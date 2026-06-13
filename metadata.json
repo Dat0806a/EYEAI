@@ -1,5 +1,5 @@
 {
-  "name": "EyeTalk Assistant",
+  "name": "EYEAI",
   "description": "Hệ thống hỗ trợ giao tiếp thông minh cho người khuyết tật và người cao tuổi bằng cử chỉ mắt và bàn phím ảo",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

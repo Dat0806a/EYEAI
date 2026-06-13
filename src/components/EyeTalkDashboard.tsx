@@ -44,7 +44,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
   
   // Simulated chat list
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { id: '1', text: 'Chào mừng bạn đến với EyeTalk Assistant!', sender: 'system', timestamp: new Date() },
+    { id: '1', text: 'Chào mừng bạn đến với EYEAI!', sender: 'system', timestamp: new Date() },
     { id: '2', text: 'Chọn "Bật Camera" hoặc sử dụng "Cảm biến Bàn phím" giả lập để thử giao tiếp bằng mắt.', sender: 'system', timestamp: new Date() }
   ]);
   const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
@@ -825,7 +825,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
               <Eye className="w-6 h-6 animate-pulse" />
             </span>
             <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-              EyeTalk Assistant <span className="text-sm font-normal text-indigo-600 bg-indigo-50 dark:bg-indigo-950 dark:text-indigo-400 px-3 py-1 rounded-full ml-2">v2.1</span>
+              EYEAI <span className="text-sm font-normal text-indigo-600 bg-indigo-50 dark:bg-indigo-950 dark:text-indigo-400 px-3 py-1 rounded-full ml-2">v2.1</span>
             </h1>
           </div>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">

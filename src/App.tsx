@@ -15,7 +15,7 @@ export default function App() {
         <div className="flex items-center gap-2.5">
           <Eye className="w-7 h-7 text-indigo-600 animate-pulse" />
           <span className="font-sans font-black text-xl tracking-tight text-slate-900 dark:text-white uppercase">
-            EyeTalk Assistant
+            EYEAI
           </span>
         </div>
         
@@ -164,7 +164,7 @@ export default function App() {
 
             {/* Footer with safety warning */}
             <footer className="text-center text-xs text-slate-400 border-t border-slate-200 dark:border-slate-800 pt-6">
-              EyeTalk Assistant &copy; 2026 • Được thiết kế tối ưu hóa khả năng truy cập cao cho người khiếm khuyết.
+            EYEAI &copy; 2026 • Được thiết kế tối ưu hóa khả năng truy cập cao cho người khiếm khuyết.
             </footer>
 
           </motion.main>
