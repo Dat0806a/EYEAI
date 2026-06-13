@@ -47,6 +47,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
     { id: '1', text: 'Chào mừng bạn đến với EyeTalk Assistant!', sender: 'system', timestamp: new Date() },
     { id: '2', text: 'Chọn "Bật Camera" hoặc sử dụng "Cảm biến Bàn phím" giả lập để thử giao tiếp bằng mắt.', sender: 'system', timestamp: new Date() }
   ]);
+  const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
 
   // Eye Calibration State
   const [calibration, setCalibration] = useState<EyeCalibrationData>({
@@ -264,13 +265,59 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
           timestamp: new Date()
         };
 
-        setChatMessages(prev => [...prev, newMsg]);
+        const updatedMessages = [...chatMessages, newMsg];
+        setChatMessages(updatedMessages);
         speakVietnamese(textToSend); // Read aloud for physical assistance
         setDraft('');
         
         // Return focus to first helpful phrase
         setFocusIndex({ row: 0, col: 0 });
+
+        // Call Gemini API server proxy
+        sendToGemini(updatedMessages);
       }
+    }
+  };
+
+  const sendToGemini = async (currentMessages: ChatMessage[]) => {
+    setIsAiLoading(true);
+    try {
+      const response = await fetch("/api/gemini/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ messages: currentMessages })
+      });
+      
+      if (!response.ok) {
+        throw new Error("Lỗi mạng hoặc server");
+      }
+      
+      const data = await response.json();
+      const reply = data.text;
+      
+      if (reply) {
+        const assistantMsg: ChatMessage = {
+          id: Date.now().toString(),
+          text: reply,
+          sender: "assistant",
+          timestamp: new Date()
+        };
+        setChatMessages(prev => [...prev, assistantMsg]);
+        speakVietnamese(reply);
+      }
+    } catch (err) {
+      console.error("Lỗi Gemini:", err);
+      const systemErrorMsg: ChatMessage = {
+        id: Date.now().toString(),
+        text: "Không thể kết nối hoặc phản hồi từ Gemini API.",
+        sender: "system",
+        timestamp: new Date()
+      };
+      setChatMessages(prev => [...prev, systemErrorMsg]);
+    } finally {
+      setIsAiLoading(false);
     }
   };
 
@@ -1124,7 +1171,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center justify-between gap-4">
                           <span>{msg.text}</span>
-                          {msg.sender === 'user' && (
+                          {msg.sender === 'user' ? (
                             <button 
                               onClick={() => speakVietnamese(msg.text)} 
                               className="p-1 hover:bg-indigo-500 rounded bg-indigo-700/60 transition-all text-white"
@@ -1132,7 +1179,15 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
                             >
                               <Volume2 className="w-4 h-4" />
                             </button>
-                          )}
+                          ) : msg.sender === 'assistant' ? (
+                            <button 
+                              onClick={() => speakVietnamese(msg.text)} 
+                              className="p-1 hover:bg-indigo-500 hover:text-white rounded bg-slate-300/60 dark:bg-slate-600/60 transition-all text-slate-700 dark:text-slate-200"
+                              title="Phát lại giọng nói"
+                            >
+                              <Volume2 className="w-4 h-4" />
+                            </button>
+                          ) : null}
                         </div>
                         <span className="text-[10px] opacity-75 self-end mt-0.5">
                           {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -1141,6 +1196,17 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
                     </div>
                   </div>
                 ))
+              )}
+
+              {isAiLoading && (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] rounded-xl px-4 py-2 bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300 rounded-bl-none border border-slate-200/40 dark:border-slate-700 flex items-center gap-1.5 animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <span className="text-xs text-slate-500 dark:text-slate-400 italic ml-1">Đang suy nghĩ...</span>
+                  </div>
+                </div>
               )}
             </div>
           </div>
