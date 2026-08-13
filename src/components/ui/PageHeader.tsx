@@ -25,7 +25,7 @@ export const PageHeader = memo(function PageHeader({
       <header className="bg-[#FFF2D6]/95 backdrop-blur-md border-b-2 border-[#14213D]/10 py-3.5 px-4 md:px-6 flex items-center justify-between shadow-xs transition-colors">
         <div className="flex items-center gap-3">
           {showBack && onBack ? (
-            <EyeFocusable id="btn-header-back" onSelect={onBack}>
+            <EyeFocusable id="btn-header-back" onSelect={onBack} speakLabel="Quay lại">
               <div className="p-3 rounded-[16px] bg-white border-2 border-[#14213D]/15 text-[#14213D] hover:bg-slate-50 active:scale-95 transition-transform min-h-[48px] min-w-[48px] flex items-center justify-center shadow-xs">
                 <ArrowLeft className="w-5 h-5" />
               </div>
@@ -67,6 +67,7 @@ export const PageHeader = memo(function PageHeader({
           <EyeFocusable
             id="btn-header-eyemode-toggle"
             onSelect={() => setEyeControlEnabled(!isEyeMode)}
+            speakLabel={isEyeMode ? 'Chế độ mắt đang bật' : 'Chế độ mắt đang tắt'}
           >
             <button
               type="button"
@@ -89,7 +90,7 @@ export const PageHeader = memo(function PageHeader({
 
           {/* Accessible Settings Button with Generous Hitbox */}
           {onOpenSettings && (
-            <EyeFocusable id="btn-header-settings" onSelect={onOpenSettings}>
+            <EyeFocusable id="btn-header-settings" onSelect={onOpenSettings} speakLabel="Cài đặt hệ thống">
               <div
                 className="p-2.5 rounded-[16px] bg-white border-2 border-[#14213D]/15 text-[#14213D] hover:bg-slate-50 active:scale-95 transition-transform min-h-[48px] min-w-[48px] flex items-center justify-center shadow-xs"
                 aria-label="Cài đặt hệ thống"

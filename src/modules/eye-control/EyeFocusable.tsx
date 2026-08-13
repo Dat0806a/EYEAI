@@ -1,7 +1,8 @@
-import React, { useRef, useEffect, ReactNode, useState, memo } from 'react';
+import React, { useRef, useEffect, ReactNode, useState, memo, useCallback } from 'react';
 import { useEyeNavigationContext } from './EyeNavigationProvider';
 import { useEyeTrackingSettings } from './useEyeTracking';
 import { motion, AnimatePresence } from 'motion/react';
+import { speakVietnamese } from '../../utils/speech';
 
 interface EyeFocusableProps {
   id: string;
@@ -13,6 +14,7 @@ interface EyeFocusableProps {
   className?: string;
   children: ReactNode;
   as?: keyof React.JSX.IntrinsicElements;
+  speakLabel?: string;
 }
 
 export const EyeFocusable = memo(function EyeFocusable({
@@ -24,6 +26,7 @@ export const EyeFocusable = memo(function EyeFocusable({
   className = '',
   children,
   as: ComponentProp = 'div',
+  speakLabel,
 }: EyeFocusableProps) {
   const Component = ComponentProp as React.ElementType;
   const elementRef = useRef<HTMLDivElement>(null);
@@ -33,11 +36,60 @@ export const EyeFocusable = memo(function EyeFocusable({
   const [isSelecting, setIsSelecting] = useState(false);
   const isFocused = settings.eyeControlEnabled && activeFocusId === id;
 
-  const handleSelect = () => {
+  // Extract clear voice text from element or props
+  const getVoiceText = useCallback((): string => {
+    if (speakLabel) return speakLabel;
+    if (!elementRef.current) return '';
+
+    const el = elementRef.current;
+    const ariaLabel = el.getAttribute('aria-label');
+    if (ariaLabel) return ariaLabel;
+
+    const titleAttr = el.getAttribute('title');
+    if (titleAttr) return titleAttr;
+
+    const rawText = el.innerText || el.textContent || '';
+    if (!rawText) return '';
+
+    // Take first non-empty line
+    const lines = rawText.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return '';
+
+    let clean = lines[0]
+      .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}🎯✨⚡🚀🔥]/gu, '')
+      .trim();
+
+    if (clean.length > 40) {
+      clean = clean.substring(0, 40).trim();
+    }
+
+    return clean;
+  }, [speakLabel]);
+
+  const handleSelect = useCallback(() => {
     setIsSelecting(true);
     setTimeout(() => setIsSelecting(false), 180);
+
+    const text = getVoiceText();
+    if (text) {
+      speakVietnamese(`Đã chọn ${text}`);
+    }
+
     if (onSelect) onSelect();
-  };
+  }, [getVoiceText, onSelect]);
+
+  // Automatically announce voice out loud when eye focus changes to this item
+  useEffect(() => {
+    if (isFocused) {
+      const text = getVoiceText();
+      if (text) {
+        const timer = setTimeout(() => {
+          speakVietnamese(text);
+        }, 100);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isFocused, getVoiceText]);
 
   useEffect(() => {
     if (!elementRef.current) return;
@@ -54,7 +106,7 @@ export const EyeFocusable = memo(function EyeFocusable({
     return () => {
       unregisterFocusNode(id);
     };
-  }, [id, groupId, row, col, registerFocusNode, unregisterFocusNode]);
+  }, [id, groupId, row, col, registerFocusNode, unregisterFocusNode, handleSelect]);
 
   return (
     <Component
