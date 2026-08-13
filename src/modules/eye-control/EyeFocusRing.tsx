@@ -21,7 +21,7 @@ export function EyeFocusRing({ visible, className = '' }: EyeFocusRingProps) {
         damping: 32,
         mass: 0.7,
       }}
-      className={`absolute inset-0 rounded-[24px] border-4 border-[#6AC9F0] shadow-[0_0_24px_rgba(106,201,240,0.60)] pointer-events-none z-20 ${className}`}
+      className={`absolute -inset-1 rounded-[26px] border-4 border-[#00E5FF] ring-2 ring-[#14213D] shadow-[0_0_32px_#00E5FF,0_0_16px_rgba(0,229,255,0.8),inset_0_0_14px_rgba(0,229,255,0.35)] pointer-events-none z-20 ${className}`}
     />
   );
 }

@@ -1227,8 +1227,8 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
                 ) : (
                   <span className="relative">
                     {draft}
-                    {/* Pulsing blinking cursor for patients validation */}
-                    <span className="w-1.5 h-8 bg-indigo-500 inline-block animate-pulse absolute -right-2 ml-1" />
+                    {/* High-visibility pulsing blinking text cursor */}
+                    <span className="w-2.5 h-8 bg-[#FF6F61] shadow-[0_0_14px_#FF6F61] inline-block animate-pulse absolute -right-3 rounded-full" />
                   </span>
                 )}
               </div>
@@ -1312,30 +1312,32 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
                             relative flex items-center justify-center border-2 rounded-xl transition-all duration-150 cursor-pointer select-none active:scale-95 ${btnHeight} ${defaultBg}
                             ${
                               isFocused 
-                                ? 'scale-[1.03] -translate-y-1 shadow-lg ring-4 ring-indigo-500/40 border-indigo-600 z-10 bg-indigo-500 text-slate-950 dark:bg-indigo-600 dark:text-white dark:border-indigo-400 font-bold' 
+                                ? 'scale-[1.06] -translate-y-1 shadow-[0_0_30px_#00E5FF,0_0_15px_rgba(0,229,255,0.8)] ring-4 ring-[#00E5FF] border-[#14213D] z-30 bg-[#14213D] text-[#00E5FF] font-black' 
                                 : 'shadow-sm'
                             }
                           `}
                         >
-                          <span className={`${isFocused ? 'text-white font-bold' : ''} ${textClasses}`}>
+                          <span className={`${isFocused ? 'text-[#00E5FF] font-black tracking-wide' : ''} ${textClasses}`}>
                             {item.label}
                           </span>
 
                           {/* Top loading bar indicator when holding action over this key */}
                           {isFocused && trackingState.currentAction === 'SELECT' && trackingState.actionProgress > 0 && (
-                            <div className="absolute inset-x-0 bottom-0 h-2 bg-white/20 rounded-b-lg overflow-hidden">
+                            <div className="absolute inset-x-0 bottom-0 h-2.5 bg-black/40 rounded-b-lg overflow-hidden">
                               <div 
-                                className="bg-white h-full transition-all duration-75"
+                                className="bg-[#00E5FF] h-full transition-all duration-75 shadow-[0_0_10px_#00E5FF]"
                                 style={{ width: `${trackingState.actionProgress}%` }}
                               />
                             </div>
                           )}
 
-                          {/* Miniature highlight badge */}
+                          {/* High-visibility glowing target badge */}
                           {isFocused && (
-                            <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                            <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center z-40">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00E5FF] opacity-90"></span>
+                              <span className="relative inline-flex rounded-full h-4 w-4 bg-[#00E5FF] text-[#14213D] font-black text-[9px] items-center justify-center border border-[#14213D]">
+                                🎯
+                              </span>
                             </span>
                           )}
                         </button>

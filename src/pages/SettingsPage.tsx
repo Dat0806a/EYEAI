@@ -2,9 +2,10 @@ import React from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { AppButton } from '../components/ui/AppButton';
 import { useEyeTracking } from '../modules/eye-control/useEyeTracking';
-import { Eye, Camera, Keyboard, Volume2, Target, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Eye, Camera, Keyboard, Volume2, Target, CheckCircle2, AlertTriangle, Play } from 'lucide-react';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { CameraPreview } from '../modules/eye-control/CameraPreview';
+import { speakVietnamese } from '../utils/speech';
 
 interface SettingsPageProps {
   onBack: () => void;
@@ -136,7 +137,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
           </div>
         </div>
 
-        {/* Section 4: Sound Feedback */}
+        {/* Section 4: Sound Feedback & Voice Output */}
         <div className="bg-white rounded-[28px] p-6 border-2 border-[#14213D]/10 card-asymmetric shadow-sm flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -144,8 +145,8 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                 <Volume2 className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-black text-lg text-[#14213D]">Phát âm thanh chỉ dẫn</h3>
-                <p className="text-xs text-[#3B4B68]">Phát tiếng Việt khi di chuyển và chọn phím</p>
+                <h3 className="font-black text-lg text-[#14213D]">Phát âm thanh chỉ dẫn & AI</h3>
+                <p className="text-xs text-[#3B4B68]">Tự động đọc giọng nói tiếng Việt trên điện thoại/máy tính</p>
               </div>
             </div>
 
@@ -153,9 +154,33 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
               id="btn-setting-toggle-sound"
               variant={settings.soundFeedback ? 'primary' : 'secondary'}
               size="sm"
-              onClick={() => setSoundFeedback(!settings.soundFeedback)}
+              onClick={() => {
+                const nextState = !settings.soundFeedback;
+                setSoundFeedback(nextState);
+                if (nextState) {
+                  speakVietnamese('Đã bật âm thanh đọc chỉ dẫn');
+                }
+              }}
             >
               <span>{settings.soundFeedback ? 'ĐANG BẬT' : 'ĐÃ TẮT'}</span>
+            </AppButton>
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-[#14213D]">Loa đọc tiếng Việt</span>
+              <span className="text-[11px] text-slate-500">Bấm thử để kích hoạt âm thanh trên điện thoại</span>
+            </div>
+            <AppButton
+              id="btn-setting-test-sound"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                speakVietnamese('Xin chào, trợ lý EyeTalk đã kết nối âm thanh thành công!');
+              }}
+              icon={<Play className="w-4 h-4 text-[#6AC9F0] fill-[#6AC9F0]" />}
+            >
+              <span>Thử phát tiếng</span>
             </AppButton>
           </div>
         </div>
