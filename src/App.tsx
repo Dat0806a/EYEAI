@@ -14,6 +14,7 @@ import { HumanChatPage } from './pages/HumanChatPage';
 import EyeTalkDashboard from './components/EyeTalkDashboard';
 import { motion, AnimatePresence } from 'motion/react';
 import { BackgroundVideo } from './components/ui/BackgroundVideo';
+import { AudioUnlockBanner } from './components/ui/AudioUnlockBanner';
 
 export type AppRoute =
   | 'home'
@@ -49,6 +50,9 @@ export default function App() {
     <EyeTrackingProvider>
       <EyeNavigationProvider>
         <CallProvider>
+          {/* iOS Safari Audio Unlock Helper Banner */}
+          <AudioUnlockBanner />
+
           {/* Global Accessibility Eye Camera HUD (Floating mini HUD on normal screens) */}
           <GlobalEyeHUD variant="floating" currentRoute={currentRoute} />
 

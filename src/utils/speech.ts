@@ -69,12 +69,27 @@ function chunkText(text: string, maxLen = 150): string[] {
   return chunks.length > 0 ? chunks : [clean];
 }
 
+let persistentAudio: HTMLAudioElement | null = null;
+
+/**
+ * Singleton persistent HTML5 Audio element to bypass iOS Safari autoplay locks.
+ */
+function getPersistentAudio(): HTMLAudioElement {
+  if (!persistentAudio && typeof window !== 'undefined') {
+    persistentAudio = new Audio();
+    persistentAudio.setAttribute('playsinline', 'true');
+    persistentAudio.setAttribute('webkit-playsinline', 'true');
+    persistentAudio.preload = 'auto';
+  }
+  return persistentAudio!;
+}
+
 /**
  * Pre-unlocks audio playback contexts on mobile web (iOS Safari & Android Chrome)
  * by playing silent speech and audio buffers on initial user interaction.
  */
 export function unlockAudio() {
-  if (typeof window === 'undefined' || isAudioUnlocked) return;
+  if (typeof window === 'undefined') return;
 
   try {
     // 1. Unlock Web Speech API
@@ -88,21 +103,22 @@ export function unlockAudio() {
       }
     }
 
-    // 2. Unlock HTML5 Audio context with silent WAV buffer
-    const silentAudio = new Audio(
-      'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
-    );
-    silentAudio.volume = 0.01;
-    const playPromise = silentAudio.play();
-    if (playPromise !== undefined) {
-      playPromise
-        .then(() => {
-          silentAudio.pause();
-          isAudioUnlocked = true;
-        })
-        .catch(() => {
-          // Will retry unlock on next interaction
-        });
+    // 2. Unlock persistent HTML5 Audio element instance with silent WAV buffer for iOS Safari
+    const audio = getPersistentAudio();
+    if (!isAudioUnlocked) {
+      audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+      audio.volume = 0.05;
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            audio.pause();
+            isAudioUnlocked = true;
+          })
+          .catch(() => {
+            // Will retry unlock on next tap
+          });
+      }
     }
   } catch (err) {
     console.warn('Audio unlock notice:', err);
@@ -147,15 +163,13 @@ export function stopSpeech() {
     }
   }
 
-  if (currentAudio) {
+  if (persistentAudio) {
     try {
-      currentAudio.pause();
-      currentAudio.currentTime = 0;
-      currentAudio.src = '';
+      persistentAudio.pause();
+      persistentAudio.currentTime = 0;
     } catch {
       // Ignore audio cleanup errors
     }
-    currentAudio = null;
   }
 
   currentUtterance = null;
@@ -190,18 +204,26 @@ function getVietnameseVoice(): SpeechSynthesisVoice | null {
 }
 
 /**
+ * Detects if the device is an iOS device (iPhone, iPad, iPod).
+ */
+function isIOSDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+/**
  * Detects if the device is a mobile phone/tablet (iOS/Android).
  */
 function isMobileDevice(): boolean {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
     navigator.userAgent
-  );
+  ) || isIOSDevice();
 }
 
 /**
- * Speaks text using Online Google TTS MP3 fallback.
- * Highly reliable on mobile browsers where native TTS is muted or missing Vietnamese.
+ * Speaks text using Online Google TTS MP3 fallback with persistent Audio element instance.
+ * Highly reliable on mobile browsers (iOS Safari & Android Chrome) where native TTS is muted or missing.
  */
 function speakOnlineAudio(
   text: string,
@@ -219,11 +241,11 @@ function speakOnlineAudio(
   options?.onStart?.();
 
   let index = 0;
+  const audio = getPersistentAudio();
 
   function playNextChunk() {
     if (index >= chunks.length || !isPlayingAudio) {
       isPlayingAudio = false;
-      currentAudio = null;
       options?.onEnd?.();
       return;
     }
@@ -235,24 +257,25 @@ function speakOnlineAudio(
       chunk
     )}`;
 
-    const audio = new Audio(ttsUrl);
-    currentAudio = audio;
-
     audio.onended = () => {
       playNextChunk();
     };
 
-    audio.onerror = () => {
-      console.warn('Online TTS chunk error, skipping to next chunk.');
+    audio.onerror = (e) => {
+      console.warn('Online TTS chunk error, skipping to next chunk:', e);
       playNextChunk();
     };
+
+    // Reuse the unlocked persistent audio element
+    audio.src = ttsUrl;
+    audio.currentTime = 0;
+    audio.volume = 1.0;
 
     const playPromise = audio.play();
     if (playPromise !== undefined) {
       playPromise.catch(err => {
-        console.warn('Audio play restricted by browser:', err);
+        console.warn('iPhone Audio play blocked by WebKit policy:', err);
         isPlayingAudio = false;
-        currentAudio = null;
         options?.onEnd?.();
       });
     }
