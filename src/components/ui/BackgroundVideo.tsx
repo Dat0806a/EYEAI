@@ -21,14 +21,45 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
 
     let isCrossfading = false;
 
-    // Start Video A from beginning
-    vA.currentTime = 0;
-    vA.play().catch(() => {});
+    // Explicitly set JS muted properties to pass strict browser autoplay policies
+    vA.muted = true;
+    vA.defaultMuted = true;
+    vB.muted = true;
+    vB.defaultMuted = true;
 
-    // Pre-seek Video B
-    vB.currentTime = 0;
-    vB.pause();
+    const safePlay = (v: HTMLVideoElement) => {
+      v.muted = true;
+      const promise = v.play();
+      if (promise && typeof promise.then === 'function') {
+        promise.catch((err) => {
+          console.warn('[BackgroundVideo] Autoplay prevented by browser, waiting for user interaction:', err);
+        });
+      }
+    };
 
+    // Attempt playing Video A immediately
+    safePlay(vA);
+
+    // Event listeners to play as soon as stream metadata is ready
+    const handleCanPlay = () => {
+      safePlay(vA);
+    };
+    vA.addEventListener('canplay', handleCanPlay);
+    vA.addEventListener('loadeddata', handleCanPlay);
+
+    // Global interaction fallback listener (starts video on user's first click or touch)
+    const handleUserInteraction = () => {
+      const currentActive = activeVideoRef.current === 'A' ? vA : vB;
+      if (currentActive && currentActive.paused) {
+        safePlay(currentActive);
+      }
+    };
+
+    window.addEventListener('click', handleUserInteraction, { capture: true, passive: true });
+    window.addEventListener('touchstart', handleUserInteraction, { capture: true, passive: true });
+    window.addEventListener('keydown', handleUserInteraction, { capture: true, passive: true });
+
+    // Smooth optical loop crossfade check
     const interval = setInterval(() => {
       const currentActive = activeVideoRef.current;
       const currentVideo = currentActive === 'A' ? vA : vB;
@@ -43,15 +74,12 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
       if (currentVideo.currentTime >= endTime && !isCrossfading && currentVideo.currentTime > 0.5) {
         isCrossfading = true;
 
-        // Pre-roll and start next video
         nextVideo.currentTime = 0;
-        nextVideo.play().catch(() => {});
+        safePlay(nextVideo);
 
-        // Switch active buffer for smooth CSS crossfade
         const nextBuffer = currentActive === 'A' ? 'B' : 'A';
         setActiveVideo(nextBuffer);
 
-        // Reset the previous video once crossfade completes
         setTimeout(() => {
           currentVideo.pause();
           currentVideo.currentTime = 0;
@@ -65,7 +93,7 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
       if (document.visibilityState === 'visible') {
         const active = activeVideoRef.current === 'A' ? vA : vB;
         if (active && active.paused) {
-          active.play().catch(() => {});
+          safePlay(active);
         }
       }
     };
@@ -74,6 +102,11 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
 
     return () => {
       clearInterval(interval);
+      vA.removeEventListener('canplay', handleCanPlay);
+      vA.removeEventListener('loadeddata', handleCanPlay);
+      window.removeEventListener('click', handleUserInteraction, { capture: true });
+      window.removeEventListener('touchstart', handleUserInteraction, { capture: true });
+      window.removeEventListener('keydown', handleUserInteraction, { capture: true });
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
@@ -95,7 +128,7 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
         className={`absolute inset-0 w-full h-full object-cover ${
           activeVideo === 'A' ? 'opacity-100' : 'opacity-0'
         }`}
-        src="/bg.mp4?v=20260813_v5"
+        src="/bg.mp4"
       />
 
       {/* Video Buffer B */}
@@ -113,7 +146,7 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
         className={`absolute inset-0 w-full h-full object-cover ${
           activeVideo === 'B' ? 'opacity-100' : 'opacity-0'
         }`}
-        src="/bg.mp4?v=20260813_v5"
+        src="/bg.mp4"
       />
 
       {/* 38% Soft Warm Overlay for UI readability & enhanced video clarity */}
