@@ -24,6 +24,63 @@ const SUGGESTED_PROMPTS = [
   { id: 'btn-suggest-3', title: 'Tôi cần hỗ trợ', prompt: 'Tôi cần hỗ trợ sử dụng hệ thống LUCKY DREAM.', icon: LifeBuoy },
 ];
 
+const SYSTEM_INSTRUCTION = 
+  "Bạn là Trợ lý AI giao tiếp và hỗ trợ hàng ngày thuộc hệ thống LUCKY DREAM – EYEAI (phần mềm hỗ trợ người dùng và bệnh nhân cần tiếp cận bằng ánh mắt). " +
+  "Trả lời bằng Tiếng Việt thân thiện, rõ ràng, dễ đọc, khoảng 2 đến 5 câu ngắn gọn. " +
+  "Tuyệt đối không tự nhận là bác sĩ, không chẩn đoán bệnh tật từ câu hỏi sức khỏe. " +
+  "Nếu người dùng hỏi về sức khỏe, hãy đưa ra lời khuyên chăm sóc chung và khuyến khích tham khảo ý kiến chuyên gia y tế khi cần. " +
+  "Nếu người dùng cần hỗ trợ khẩn cấp hoặc cấp cứu, hãy gợi ý họ sử dụng tính năng SOS trên màn hình chính của LUCKY DREAM. " +
+  "Tránh viết các đoạn quá dài, danh sách dài dòng hoặc bảng biểu phức tạp trừ khi người dùng yêu cầu chi tiết.";
+
+async function fetchDirectGemini(textToSend: string, history: any[], signal: AbortSignal): Promise<string> {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Chưa cấu hình VITE_GEMINI_API_KEY trong môi trường ứng dụng.");
+  }
+
+  const recentHistory = history.slice(-15);
+  const contents: any[] = [];
+  for (const msg of recentHistory) {
+    const text = (msg.text || msg.content || "").trim();
+    if (!text) continue;
+    const role = msg.sender === 'user' ? 'user' : 'model';
+    contents.push({ role, parts: [{ text }] });
+  }
+  contents.push({ role: 'user', parts: [{ text: textToSend }] });
+
+  const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-flash"];
+  let lastError: any = null;
+
+  for (const modelName of modelsToTry) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: contents,
+          systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] }
+        }),
+        signal
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (candidateText) {
+          return candidateText;
+        }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        lastError = errJson?.error?.message || `HTTP ${res.status}`;
+      }
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  throw new Error(typeof lastError === 'string' ? lastError : 'Không thể kết nối Gemini API.');
+}
+
 export function AiPage({ onBack }: AiPageProps) {
   const [draft, setDraft] = useState<string>('');
   const [isKeyboardOpen, setIsKeyboardOpen] = useState<boolean>(false);
@@ -103,33 +160,35 @@ export function AiPage({ onBack }: AiPageProps) {
     }, 15000);
 
     try {
-      const response = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: textToSend,
-          history: history,
-        }),
-        signal: abortControllerRef.current.signal,
-      });
+      let reply = '';
+      let fetchedSuccessfully = false;
 
-      clearTimeout(timeoutId);
+      try {
+        const response = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: textToSend,
+            history: history,
+          }),
+          signal: abortControllerRef.current.signal,
+        });
 
-      if (!response.ok) {
-        let serverErrorMsg = `Server returned status ${response.status}`;
-        try {
-          const errData = await response.json();
-          if (errData?.error) {
-            serverErrorMsg = errData.error;
-          }
-        } catch {
-          // Fallback to HTTP status string if JSON parse fails
+        const contentType = response.headers.get('content-type') || '';
+        if (response.ok && contentType.includes('application/json')) {
+          const data = await response.json();
+          reply = data.message || data.text || '';
+          if (reply) fetchedSuccessfully = true;
         }
-        throw new Error(serverErrorMsg);
+      } catch {
+        // Express backend unavailable, proceed to client fallback
       }
 
-      const data = await response.json();
-      const reply = data.message || data.text;
+      if (!fetchedSuccessfully) {
+        reply = await fetchDirectGemini(textToSend, history, abortControllerRef.current.signal);
+      }
+
+      clearTimeout(timeoutId);
 
       if (reply) {
         const aiMsg: ChatMessage = {
