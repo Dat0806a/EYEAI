@@ -7,6 +7,7 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
   const videoRefB = useRef<HTMLVideoElement | null>(null);
 
   const [activeVideo, setActiveVideo] = useState<'A' | 'B'>('A');
+  const [hasBufferBLoaded, setHasBufferBLoaded] = useState(false);
   const activeVideoRef = useRef<'A' | 'B'>('A');
 
   // Sync ref with active state
@@ -17,49 +18,30 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
   useEffect(() => {
     const vA = videoRefA.current;
     const vB = videoRefB.current;
-    if (!vA || !vB) return;
 
-    let isCrossfading = false;
-
-    // Explicitly set JS muted properties to pass strict browser autoplay policies
-    vA.muted = true;
-    vA.defaultMuted = true;
-    vB.muted = true;
-    vB.defaultMuted = true;
-
-    const safePlay = (v: HTMLVideoElement) => {
-      v.muted = true;
-      const promise = v.play();
+    const attemptPlay = (video: HTMLVideoElement | null) => {
+      if (!video) return;
+      video.muted = true;
+      video.defaultMuted = true;
+      const promise = video.play();
       if (promise && typeof promise.then === 'function') {
         promise.catch((err) => {
-          console.warn('[BackgroundVideo] Autoplay prevented by browser, waiting for user interaction:', err);
+          console.warn('[BackgroundVideo] Autoplay waiting for user interaction:', err);
         });
       }
     };
 
-    // Attempt playing Video A immediately
-    safePlay(vA);
+    // Force play Video A immediately on mount
+    if (vA) {
+      attemptPlay(vA);
+    }
 
-    // Event listeners to play as soon as stream metadata is ready
-    const handleCanPlay = () => {
-      safePlay(vA);
-    };
-    vA.addEventListener('canplay', handleCanPlay);
-    vA.addEventListener('loadeddata', handleCanPlay);
+    // Lazy-load Buffer B source after 2s so Buffer A gets 100% network bandwidth on first open
+    const lazyTimer = setTimeout(() => {
+      setHasBufferBLoaded(true);
+    }, 2000);
 
-    // Global interaction fallback listener (starts video on user's first click or touch)
-    const handleUserInteraction = () => {
-      const currentActive = activeVideoRef.current === 'A' ? vA : vB;
-      if (currentActive && currentActive.paused) {
-        safePlay(currentActive);
-      }
-    };
-
-    window.addEventListener('click', handleUserInteraction, { capture: true, passive: true });
-    window.addEventListener('touchstart', handleUserInteraction, { capture: true, passive: true });
-    window.addEventListener('keydown', handleUserInteraction, { capture: true, passive: true });
-
-    // Smooth optical loop crossfade check
+    // Seamless loop crossfade checker
     const interval = setInterval(() => {
       const currentActive = activeVideoRef.current;
       const currentVideo = currentActive === 'A' ? vA : vB;
@@ -71,11 +53,9 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
       const endTime = Math.max(0.5, currentVideo.duration - fadeTimeSec);
 
       // Trigger crossfade when current video reaches the end boundary
-      if (currentVideo.currentTime >= endTime && !isCrossfading && currentVideo.currentTime > 0.5) {
-        isCrossfading = true;
-
+      if (currentVideo.currentTime >= endTime && currentVideo.currentTime > 0.5) {
         nextVideo.currentTime = 0;
-        safePlay(nextVideo);
+        attemptPlay(nextVideo);
 
         const nextBuffer = currentActive === 'A' ? 'B' : 'A';
         setActiveVideo(nextBuffer);
@@ -83,37 +63,32 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
         setTimeout(() => {
           currentVideo.pause();
           currentVideo.currentTime = 0;
-          isCrossfading = false;
         }, FADE_DURATION_MS);
       }
     }, 150);
 
-    // Resume video if page visibility changes
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        const active = activeVideoRef.current === 'A' ? vA : vB;
-        if (active && active.paused) {
-          safePlay(active);
-        }
-      }
+    // Interaction fallback listeners
+    const handleInteraction = () => {
+      const active = activeVideoRef.current === 'A' ? vA : vB;
+      attemptPlay(active);
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pointerdown', handleInteraction, { capture: true, passive: true });
+    window.addEventListener('touchstart', handleInteraction, { capture: true, passive: true });
+    window.addEventListener('keydown', handleInteraction, { capture: true, passive: true });
 
     return () => {
+      clearTimeout(lazyTimer);
       clearInterval(interval);
-      vA.removeEventListener('canplay', handleCanPlay);
-      vA.removeEventListener('loadeddata', handleCanPlay);
-      window.removeEventListener('click', handleUserInteraction, { capture: true });
-      window.removeEventListener('touchstart', handleUserInteraction, { capture: true });
-      window.removeEventListener('keydown', handleUserInteraction, { capture: true });
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pointerdown', handleInteraction, { capture: true });
+      window.removeEventListener('touchstart', handleInteraction, { capture: true });
+      window.removeEventListener('keydown', handleInteraction, { capture: true });
     };
   }, []);
 
   return (
     <div className="fixed inset-0 w-full h-full pointer-events-none z-0 overflow-hidden select-none">
-      {/* Video Buffer A */}
+      {/* Video Buffer A - Primary Instant Load Buffer */}
       <video
         ref={videoRefA}
         autoPlay
@@ -121,6 +96,14 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
         loop
         playsInline
         preload="auto"
+        onCanPlay={(e) => {
+          e.currentTarget.muted = true;
+          e.currentTarget.play().catch(() => {});
+        }}
+        onLoadedData={(e) => {
+          e.currentTarget.muted = true;
+          e.currentTarget.play().catch(() => {});
+        }}
         style={{
           transition: `opacity ${FADE_DURATION_MS}ms ease-in-out`,
           filter: 'contrast(1.1) brightness(1.05) saturate(1.05)',
@@ -131,7 +114,7 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
         src="/bg.mp4"
       />
 
-      {/* Video Buffer B */}
+      {/* Video Buffer B - Secondary Buffer (Loaded lazily after Buffer A is active) */}
       <video
         ref={videoRefB}
         autoPlay
@@ -139,6 +122,9 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
         loop
         playsInline
         preload="auto"
+        onCanPlay={(e) => {
+          e.currentTarget.muted = true;
+        }}
         style={{
           transition: `opacity ${FADE_DURATION_MS}ms ease-in-out`,
           filter: 'contrast(1.1) brightness(1.05) saturate(1.05)',
@@ -146,7 +132,7 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
         className={`absolute inset-0 w-full h-full object-cover ${
           activeVideo === 'B' ? 'opacity-100' : 'opacity-0'
         }`}
-        src="/bg.mp4"
+        src={hasBufferBLoaded ? "/bg.mp4" : undefined}
       />
 
       {/* 38% Soft Warm Overlay for UI readability & enhanced video clarity */}
