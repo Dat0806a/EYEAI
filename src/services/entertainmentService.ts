@@ -37,12 +37,15 @@ function decodeHtmlEntities(str: string): string {
 }
 
 async function searchYouTubeDirect(query: string, mode: EntertainmentMode): Promise<EntertainmentSearchResponse> {
-  const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY || import.meta.env.YOUTUBE_API_KEY;
+  const apiKey = 
+    import.meta.env.VITE_YOUTUBE_API_KEY || 
+    import.meta.env.YOUTUBE_API_KEY || 
+    (typeof process !== 'undefined' && (process.env?.YOUTUBE_API_KEY || process.env?.VITE_YOUTUBE_API_KEY));
   if (!apiKey) {
     return {
       success: false,
       error: 'YOUTUBE_API_KEY_MISSING',
-      message: 'Chưa cấu hình VITE_YOUTUBE_API_KEY.',
+      message: 'Chưa cấu hình YOUTUBE_API_KEY hoặc VITE_YOUTUBE_API_KEY trên Netlify Dashboard.',
       results: [],
     };
   }

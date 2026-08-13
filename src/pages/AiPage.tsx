@@ -12,6 +12,7 @@ import { EyeFocusable } from '../modules/eye-control/EyeFocusable';
 import { useCall } from '../modules/calls/CallProvider';
 import { Avatar3D, AvatarState } from '../components/ui/Avatar3D';
 import { KeyboardHudSlot } from '../components/ui/KeyboardHudSlot';
+import { GoogleGenAI } from '@google/genai';
 
 interface AiPageProps {
   onBack: () => void;
@@ -33,9 +34,15 @@ const SYSTEM_INSTRUCTION =
   "Tránh viết các đoạn quá dài, danh sách dài dòng hoặc bảng biểu phức tạp trừ khi người dùng yêu cầu chi tiết.";
 
 async function fetchDirectGemini(textToSend: string, history: any[], signal: AbortSignal): Promise<string> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY;
+  const apiKey = (
+    import.meta.env.VITE_GEMINI_API_KEY || 
+    import.meta.env.GEMINI_API_KEY || 
+    (typeof process !== 'undefined' && (process.env?.GEMINI_API_KEY || process.env?.VITE_GEMINI_API_KEY)) ||
+    ""
+  ).trim();
+
   if (!apiKey) {
-    throw new Error("Chưa cấu hình VITE_GEMINI_API_KEY trong môi trường ứng dụng.");
+    throw new Error("Chưa cấu hình GEMINI_API_KEY hoặc VITE_GEMINI_API_KEY trên Netlify Dashboard.");
   }
 
   const recentHistory = history.slice(-15);
@@ -48,14 +55,50 @@ async function fetchDirectGemini(textToSend: string, history: any[], signal: Abo
   }
   contents.push({ role: 'user', parts: [{ text: textToSend }] });
 
-  const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-flash"];
+  // 1. Try official @google/genai SDK (supports all key formats including new AQ... keys)
+  try {
+    const ai = new GoogleGenAI({
+      apiKey: apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+
+    const modelsToTry = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-flash-lite-latest", "gemini-2.0-flash"];
+    for (const modelName of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: contents,
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+          }
+        });
+        if (response && response.text) {
+          return response.text;
+        }
+      } catch (err) {
+        console.warn(`[GoogleGenAI SDK] Model ${modelName} attempt failed:`, err);
+      }
+    }
+  } catch (sdkErr) {
+    console.warn('[GoogleGenAI SDK] SDK execution failed, falling back to REST:', sdkErr);
+  }
+
+  // 2. Direct REST API Fallback
+  const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash"];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'User-Agent': 'aistudio-build',
+        },
         body: JSON.stringify({
           contents: contents,
           systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] }
@@ -71,14 +114,18 @@ async function fetchDirectGemini(textToSend: string, history: any[], signal: Abo
         }
       } else {
         const errJson = await res.json().catch(() => ({}));
-        lastError = errJson?.error?.message || `HTTP ${res.status}`;
+        const errMsg = errJson?.error?.message || `HTTP ${res.status}`;
+        console.warn(`[GEMINI DIRECT REST] Model ${modelName} failed:`, errMsg);
+        lastError = errMsg;
       }
-    } catch (e) {
-      lastError = e;
+    } catch (e: any) {
+      if (e.name === 'AbortError') throw e;
+      lastError = e?.message || e;
     }
   }
 
-  throw new Error(typeof lastError === 'string' ? lastError : 'Không thể kết nối Gemini API.');
+  const errStr = typeof lastError === 'string' ? lastError : JSON.stringify(lastError || {});
+  throw new Error(errStr || "Không thể kết nối Gemini API.");
 }
 
 export function AiPage({ onBack }: AiPageProps) {
