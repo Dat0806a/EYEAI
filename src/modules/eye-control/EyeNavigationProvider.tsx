@@ -19,8 +19,12 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
   const [activeFocusId, setActiveFocusId] = useState<string | null>(null);
 
   const registerFocusNode = useCallback((node: EyeFocusNode) => {
+    const isExisting = nodesRef.current.has(node.id);
     nodesRef.current.set(node.id, node);
-    // If no active focus, default to first registered node
+    
+    // If node was already registered (just updating properties), do not reset focus
+    if (isExisting) return;
+
     setActiveFocusId(prev => {
       if (!prev || !nodesRef.current.has(prev)) {
         return node.id;
@@ -30,11 +34,24 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const unregisterFocusNode = useCallback((id: string) => {
+    const nodeToRemove = nodesRef.current.get(id);
     nodesRef.current.delete(id);
+    
     setActiveFocusId(prev => {
       if (prev === id) {
-        const remaining = Array.from(nodesRef.current.keys());
-        return remaining.length > 0 ? remaining[0] : null;
+        const remainingNodes: EyeFocusNode[] = Array.from(nodesRef.current.values());
+        if (remainingNodes.length === 0) return null;
+
+        // If the unregistered node belonged to a specific group (e.g. virtual-keyboard),
+        // try to keep focus inside that same group!
+        if (nodeToRemove?.groupId) {
+          const sameGroupNodes = remainingNodes.filter(n => n.groupId === nodeToRemove.groupId);
+          if (sameGroupNodes.length > 0) {
+            return sameGroupNodes[0].id;
+          }
+        }
+
+        return remainingNodes[0].id;
       }
       return prev;
     });
@@ -59,32 +76,122 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
 
       const currNode = nodesRef.current.get(currentId)!;
 
-      // Group-based / grid-based directional navigation
-      if (currNode.row !== undefined && currNode.col !== undefined) {
-        const sameGroupNodes = allNodes.filter(n => n.groupId === currNode.groupId && n.row !== undefined && n.col !== undefined);
-        
-        let targetNode: EyeFocusNode | undefined;
-        if (direction === 'NEXT') {
-          // Right: next col on same row
-          targetNode = sameGroupNodes.find(n => n.row === currNode.row && n.col === currNode.col! + 1);
-        } else if (direction === 'BACK') {
-          // Left: prev col on same row
-          targetNode = sameGroupNodes.find(n => n.row === currNode.row && n.col === currNode.col! - 1);
-        } else if (direction === 'DOWN') {
-          // Down: next row on same or closest col
-          targetNode = sameGroupNodes.find(n => n.row === currNode.row! + 1 && n.col === currNode.col);
-          if (!targetNode) {
-            targetNode = sameGroupNodes.find(n => n.row === currNode.row! + 1);
-          }
-        } else if (direction === 'UP') {
-          // Up: prev row on same or closest col
-          targetNode = sameGroupNodes.find(n => n.row === currNode.row! - 1 && n.col === currNode.col);
-          if (!targetNode) {
-            targetNode = sameGroupNodes.find(n => n.row === currNode.row! - 1);
+      // Group-based cyclic & nearest-X grid navigation (especially for virtual-keyboard)
+      if (currNode.groupId && currNode.row !== undefined && currNode.col !== undefined) {
+        const sameGroupNodes = allNodes.filter(
+          n => n.groupId === currNode.groupId && n.row !== undefined && n.col !== undefined
+        );
+
+        if (sameGroupNodes.length > 0) {
+          // Unique sorted rows
+          const rows = Array.from(new Set(sameGroupNodes.map(n => n.row!))).sort((a, b) => a - b);
+          const currRowIdx = rows.indexOf(currNode.row);
+
+          if (currRowIdx !== -1) {
+            const currRowNodes = sameGroupNodes
+              .filter(n => n.row === currNode.row)
+              .sort((a, b) => a.col! - b.col!);
+
+            const currColIdx = currRowNodes.findIndex(n => n.id === currentId);
+
+            // HORIZONTAL WRAP (NEXT = Right, BACK = Left)
+            if (direction === 'NEXT' || direction === 'BACK') {
+              let targetNode: EyeFocusNode;
+              let isWrap = false;
+
+              if (direction === 'NEXT') {
+                if (currColIdx !== -1 && currColIdx < currRowNodes.length - 1) {
+                  targetNode = currRowNodes[currColIdx + 1];
+                } else {
+                  // WRAP RIGHT EDGE TO LEFT-MOST KEY OF SAME ROW
+                  targetNode = currRowNodes[0];
+                  isWrap = true;
+                }
+              } else { // BACK (Left)
+                if (currColIdx > 0) {
+                  targetNode = currRowNodes[currColIdx - 1];
+                } else {
+                  // WRAP LEFT EDGE TO RIGHT-MOST KEY OF SAME ROW
+                  targetNode = currRowNodes[currRowNodes.length - 1];
+                  isWrap = true;
+                }
+              }
+
+              if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
+                console.log(`[KEYBOARD][NAV] fromKey: ${currentId}, dir: ${direction}, toKey: ${targetNode.id}, wrap: ${isWrap}`);
+              }
+              return targetNode.id;
+            }
+
+            // VERTICAL WRAP & GEOMETRIC NEAREST-X SELECTION (UP / DOWN)
+            if (direction === 'UP' || direction === 'DOWN') {
+              let targetRowIdx: number;
+              let isWrap = false;
+
+              if (direction === 'UP') {
+                if (currRowIdx > 0) {
+                  targetRowIdx = currRowIdx - 1;
+                } else {
+                  // WRAP TOP ROW TO BOTTOM ROW
+                  targetRowIdx = rows.length - 1;
+                  isWrap = true;
+                }
+              } else { // DOWN
+                if (currRowIdx < rows.length - 1) {
+                  targetRowIdx = currRowIdx + 1;
+                } else {
+                  // WRAP BOTTOM ROW TO TOP ROW
+                  targetRowIdx = 0;
+                  isWrap = true;
+                }
+              }
+
+              const targetRowNumber = rows[targetRowIdx];
+              const targetRowNodes = sameGroupNodes.filter(n => n.row === targetRowNumber);
+
+              // Calculate current key horizontal center (centerX)
+              let currCenterX = 0;
+              let hasDomGeometry = false;
+              const currRect = currNode.element.getBoundingClientRect();
+              if (currRect.width > 0) {
+                currCenterX = currRect.left + currRect.width / 2;
+                hasDomGeometry = true;
+              }
+
+              let bestCandidate: EyeFocusNode = targetRowNodes[0];
+
+              if (hasDomGeometry) {
+                let minDistX = Infinity;
+                for (const candidate of targetRowNodes) {
+                  const candRect = candidate.element.getBoundingClientRect();
+                  const candCenterX = candRect.left + candRect.width / 2;
+                  const distX = Math.abs(candCenterX - currCenterX);
+                  if (distX < minDistX) {
+                    minDistX = distX;
+                    bestCandidate = candidate;
+                  }
+                }
+              } else {
+                // Ratio-based fallback when rects are 0 (e.g. initial frame or offscreen)
+                const currRatio = (currNode.col! + 0.5) / Math.max(1, currRowNodes.length);
+                let minRatioDiff = Infinity;
+                for (const candidate of targetRowNodes) {
+                  const candRatio = (candidate.col! + 0.5) / Math.max(1, targetRowNodes.length);
+                  const diff = Math.abs(candRatio - currRatio);
+                  if (diff < minRatioDiff) {
+                    minRatioDiff = diff;
+                    bestCandidate = candidate;
+                  }
+                }
+              }
+
+              if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
+                console.log(`[KEYBOARD][NAV] fromKey: ${currentId}, dir: ${direction}, toKey: ${bestCandidate.id}, wrap: ${isWrap}`);
+              }
+              return bestCandidate.id;
+            }
           }
         }
-
-        if (targetNode) return targetNode.id;
       }
 
       // 2D Spatial bounding box nearest neighbor search
@@ -156,6 +263,9 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
   const triggerSelect = useCallback(() => {
     if (activeFocusId && nodesRef.current.has(activeFocusId)) {
       const node = nodesRef.current.get(activeFocusId)!;
+      if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
+        console.log(`[KEYBOARD][SELECT] selectedKey: ${activeFocusId}, focusBefore: ${activeFocusId}, focusAfter: ${activeFocusId}`);
+      }
       if (node.onSelect) {
         node.onSelect();
       } else {

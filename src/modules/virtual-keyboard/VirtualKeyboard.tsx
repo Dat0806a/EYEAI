@@ -5,6 +5,7 @@ import { GridItem, VirtualKeyboardProps } from './types';
 import { EyeFocusable } from '../eye-control/EyeFocusable';
 import { ChevronDown, Delete, Send, Search, Volume2 } from 'lucide-react';
 import { useEyeTrackingSettings } from '../eye-control/useEyeTracking';
+import { useEyeNavigationContext } from '../eye-control/EyeNavigationProvider';
 
 export function VirtualKeyboard({
   isOpen,
@@ -13,8 +14,35 @@ export function VirtualKeyboard({
   actionLabel = 'Gửi',
 }: VirtualKeyboardProps & { actionLabel?: string }) {
   const { setKeyboardOpen } = useEyeTrackingSettings();
+  const { setFocusId } = useEyeNavigationContext();
   const [layoutMode, setLayoutMode] = useState<'QWERTY' | 'NUMBERS' | 'PHRASES'>('QWERTY');
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const currentLayout =
+    layoutMode === 'NUMBERS'
+      ? NUMBERS_LAYOUT
+      : layoutMode === 'PHRASES'
+      ? PHRASES_LAYOUT
+      : QWERTY_LAYOUT;
+
+  // Initial focus management when keyboard opens or layout changes
+  const prevIsOpenRef = useRef(isOpen);
+  useEffect(() => {
+    if (isOpen && !prevIsOpenRef.current) {
+      const initialKeyId = `key-${currentLayout[0][0].id}`;
+      setFocusId(initialKeyId);
+    }
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen, setFocusId, currentLayout]);
+
+  const prevLayoutRef = useRef(layoutMode);
+  useEffect(() => {
+    if (isOpen && prevLayoutRef.current !== layoutMode) {
+      const initialKeyId = `key-${currentLayout[0][0].id}`;
+      setFocusId(initialKeyId);
+    }
+    prevLayoutRef.current = layoutMode;
+  }, [layoutMode, isOpen, setFocusId, currentLayout]);
 
   // Measure keyboard height and inform global context for floating HUD position
   useEffect(() => {
@@ -47,15 +75,6 @@ export function VirtualKeyboard({
     };
   }, [isOpen, setKeyboardOpen]);
 
-  if (!isOpen) return null;
-
-  const currentLayout =
-    layoutMode === 'NUMBERS'
-      ? NUMBERS_LAYOUT
-      : layoutMode === 'PHRASES'
-      ? PHRASES_LAYOUT
-      : QWERTY_LAYOUT;
-
   const handleKeyClick = (item: GridItem) => {
     if (item.value === 'TOGGLE_NUMBERS') {
       setLayoutMode('NUMBERS');
@@ -71,6 +90,8 @@ export function VirtualKeyboard({
     }
     onKeyPress(item);
   };
+
+  if (!isOpen) return null;
 
   return (
     <AnimatePresence>

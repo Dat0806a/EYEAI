@@ -36,9 +36,19 @@ export const EyeFocusable = memo(function EyeFocusable({
   const [isSelecting, setIsSelecting] = useState(false);
   const isFocused = settings.eyeControlEnabled && activeFocusId === id;
 
+  const onSelectRef = useRef(onSelect);
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
+
+  const speakLabelRef = useRef(speakLabel);
+  useEffect(() => {
+    speakLabelRef.current = speakLabel;
+  }, [speakLabel]);
+
   // Extract clear voice text from element or props
   const getVoiceText = useCallback((): string => {
-    if (speakLabel) return speakLabel;
+    if (speakLabelRef.current) return speakLabelRef.current;
     if (!elementRef.current) return '';
 
     const el = elementRef.current;
@@ -64,7 +74,7 @@ export const EyeFocusable = memo(function EyeFocusable({
     }
 
     return clean;
-  }, [speakLabel]);
+  }, []);
 
   const handleSelect = useCallback(() => {
     setIsSelecting(true);
@@ -75,8 +85,8 @@ export const EyeFocusable = memo(function EyeFocusable({
       speakVietnamese(`Đã chọn ${text}`);
     }
 
-    if (onSelect) onSelect();
-  }, [getVoiceText, onSelect]);
+    if (onSelectRef.current) onSelectRef.current();
+  }, [getVoiceText]);
 
   // Automatically announce voice out loud when eye focus changes to this item
   useEffect(() => {
