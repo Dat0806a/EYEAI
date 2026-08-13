@@ -26,12 +26,16 @@ const QUICK_PHRASES = [
   'Tôi thấy mệt.',
 ];
 
+import { useEyeTrackingSettings } from '../modules/eye-control/useEyeTracking';
+
 export function SpeakPage({ onBack }: SpeakPageProps) {
+  const { settings } = useEyeTrackingSettings();
   const [draft, setDraft] = useState<string>('');
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState<boolean>(true);
   const [isSpeakingState, setIsSpeakingState] = useState<boolean>(false);
   const [callWarning, setCallWarning] = useState<string | null>(null);
+  const [speakerOffNotice, setSpeakerOffNotice] = useState<string | null>(null);
   const [speechSupported, setSpeechSupported] = useState<boolean>(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -77,6 +81,12 @@ export function SpeakPage({ onBack }: SpeakPageProps) {
       return;
     }
 
+    if (!settings.speakerEnabled) {
+      setSpeakerOffNotice('Loa đang tắt. Bạn có thể bật trong Cài đặt.');
+      setTimeout(() => setSpeakerOffNotice(null), 4000);
+      return;
+    }
+
     // Stop previous speech if running and speak new text immediately
     stopSpeech();
     setIsSpeakingState(true);
@@ -111,8 +121,13 @@ export function SpeakPage({ onBack }: SpeakPageProps) {
     setMessages(prev => [...prev, newMsg]);
     setDraft('');
 
-    // Trigger TTS reading immediately
-    handleSpeakText(textToSend);
+    // Trigger TTS reading or show warning if speaker is disabled (Requirement 9)
+    if (!settings.speakerEnabled) {
+      setSpeakerOffNotice('Loa đang tắt. Bạn có thể bật trong Cài đặt.');
+      setTimeout(() => setSpeakerOffNotice(null), 4000);
+    } else {
+      handleSpeakText(textToSend);
+    }
 
     setTimeout(() => {
       submittingRef.current = false;
@@ -216,6 +231,14 @@ export function SpeakPage({ onBack }: SpeakPageProps) {
           <div className="mb-4 p-3 bg-rose-100 border-2 border-rose-400 rounded-2xl text-rose-900 text-xs sm:text-sm font-bold flex items-center gap-2 animate-bounce">
             <AlertTriangle className="w-5 h-5 text-rose-700 flex-shrink-0" />
             <span>{callWarning}</span>
+          </div>
+        )}
+
+        {/* Speaker OFF Banner Warning */}
+        {speakerOffNotice && (
+          <div className="mb-4 p-3 bg-amber-100 border-2 border-amber-400 rounded-2xl text-amber-900 text-xs sm:text-sm font-bold flex items-center gap-2 animate-bounce">
+            <AlertTriangle className="w-5 h-5 text-amber-700 flex-shrink-0" />
+            <span>{speakerOffNotice}</span>
           </div>
         )}
 

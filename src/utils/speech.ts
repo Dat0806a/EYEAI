@@ -7,6 +7,59 @@ let currentAudio: HTMLAudioElement | null = null;
 let isPlayingAudio = false;
 let cachedVoices: SpeechSynthesisVoice[] = [];
 
+export interface SpeechSettings {
+  speakerEnabled: boolean;
+  speechVolume: number; // 0.0 to 1.0
+  speechRate: number;   // 0.7 to 1.5
+}
+
+function loadInitialSpeechSettings(): SpeechSettings {
+  if (typeof window === 'undefined') {
+    return { speakerEnabled: true, speechVolume: 1.0, speechRate: 1.0 };
+  }
+  try {
+    const savedEnabled = localStorage.getItem('luckyDream.speakerEnabled');
+    const savedVolume = localStorage.getItem('luckyDream.speechVolume');
+    const savedRate = localStorage.getItem('luckyDream.speechRate');
+    return {
+      speakerEnabled: savedEnabled !== null ? savedEnabled === 'true' : true,
+      speechVolume: savedVolume !== null ? Math.max(0, Math.min(1, parseFloat(savedVolume))) : 1.0,
+      speechRate: savedRate !== null ? Math.max(0.7, Math.min(1.5, parseFloat(savedRate))) : 1.0,
+    };
+  } catch {
+    return { speakerEnabled: true, speechVolume: 1.0, speechRate: 1.0 };
+  }
+}
+
+let currentSpeechSettings: SpeechSettings = loadInitialSpeechSettings();
+
+export function getSpeechSettings(): SpeechSettings {
+  return { ...currentSpeechSettings };
+}
+
+export function updateSpeechSettings(newSettings: Partial<SpeechSettings>) {
+  const previousEnabled = currentSpeechSettings.speakerEnabled;
+  currentSpeechSettings = {
+    ...currentSpeechSettings,
+    ...newSettings,
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('luckyDream.speakerEnabled', String(currentSpeechSettings.speakerEnabled));
+      localStorage.setItem('luckyDream.speechVolume', String(currentSpeechSettings.speechVolume));
+      localStorage.setItem('luckyDream.speechRate', String(currentSpeechSettings.speechRate));
+    } catch {
+      // ignore
+    }
+  }
+
+  // STOP SPEECH IMMEDIATELY IF TURNING SPEAKER OFF (Requirement 24)
+  if (previousEnabled && !currentSpeechSettings.speakerEnabled) {
+    stopSpeech();
+  }
+}
+
 /**
  * Preload available browser voices asynchronously.
  */
@@ -159,9 +212,17 @@ export function speakVietnamese(
   options?: {
     onStart?: () => void;
     onEnd?: () => void;
+    volume?: number;
+    rate?: number;
   }
 ) {
   if (typeof window === 'undefined') {
+    options?.onEnd?.();
+    return;
+  }
+
+  // Master check: speakerEnabled (Requirements 4, 7, 8)
+  if (!currentSpeechSettings.speakerEnabled) {
     options?.onEnd?.();
     return;
   }
@@ -186,9 +247,9 @@ export function speakVietnamese(
 
       const utterance = new SpeechSynthesisUtterance(cleanedText);
       utterance.lang = 'vi-VN';
-      utterance.rate = 0.95;
+      utterance.rate = options?.rate ?? currentSpeechSettings.speechRate;
       utterance.pitch = 1.0;
-      utterance.volume = 1.0;
+      utterance.volume = options?.volume ?? currentSpeechSettings.speechVolume;
 
       const viVoice = getVietnameseVoice();
       if (viVoice) {

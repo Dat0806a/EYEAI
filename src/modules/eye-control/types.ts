@@ -30,6 +30,9 @@ export interface EyeControlSettings {
   dwellTimeMs: number;
   soundFeedback: boolean;
   simulatorMode: boolean;
+  speakerEnabled: boolean;
+  speechVolume: number;
+  speechRate: number;
 }
 
 export interface EyeFocusNode {

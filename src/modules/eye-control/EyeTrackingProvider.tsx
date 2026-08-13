@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode, useCallback, useMemo } from 'react';
 import { EyeAction, EyeCalibrationData, EyeTrackingState, EyeControlSettings } from './types';
 import { analyzeEyes, EYE_INDICES } from './eyeTracker';
-import { speakVietnamese } from '../../utils/speech';
+import { speakVietnamese, updateSpeechSettings } from '../../utils/speech';
 
 export interface EyeTrackingSettingsContextType {
   settings: EyeControlSettings;
@@ -16,6 +16,9 @@ export interface EyeTrackingSettingsContextType {
   setEyeControlEnabled: (enabled: boolean) => void;
   setSimulatorMode: (enabled: boolean) => void;
   setSoundFeedback: (enabled: boolean) => void;
+  setSpeakerEnabled: (enabled: boolean) => void;
+  setSpeechVolume: (volume: number) => void;
+  setSpeechRate: (rate: number) => void;
   toggleCamera: () => Promise<void>;
   startCalibration: () => void;
   calibrationStage: 'idle' | 'countdown' | 'collecting' | 'completed';
@@ -50,23 +53,46 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   // Settings with localStorage persistence
   const [settings, setSettings] = useState<EyeControlSettings>(() => {
     const saved = localStorage.getItem('luckydream_eye_settings');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        // Fallback
-      }
-    }
-    return {
+    const savedSpeakerEnabled = localStorage.getItem('luckyDream.speakerEnabled');
+    const savedSpeechVolume = localStorage.getItem('luckyDream.speechVolume');
+    const savedSpeechRate = localStorage.getItem('luckyDream.speechRate');
+
+    const defaultSpeakerEnabled = savedSpeakerEnabled !== null ? savedSpeakerEnabled === 'true' : true;
+    const defaultSpeechVolume = savedSpeechVolume !== null ? Math.max(0, Math.min(1, parseFloat(savedSpeechVolume))) : 1.0;
+    const defaultSpeechRate = savedSpeechRate !== null ? Math.max(0.7, Math.min(1.5, parseFloat(savedSpeechRate))) : 1.0;
+
+    let base: EyeControlSettings = {
       eyeControlEnabled: true,
       dwellTimeMs: 1500,
       soundFeedback: true,
       simulatorMode: true,
+      speakerEnabled: defaultSpeakerEnabled,
+      speechVolume: defaultSpeechVolume,
+      speechRate: defaultSpeechRate,
     };
+
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return { ...base, ...parsed };
+      } catch (e) {
+        // Fallback
+      }
+    }
+    return base;
   });
 
   useEffect(() => {
     localStorage.setItem('luckydream_eye_settings', JSON.stringify(settings));
+    localStorage.setItem('luckyDream.speakerEnabled', String(settings.speakerEnabled));
+    localStorage.setItem('luckyDream.speechVolume', String(settings.speechVolume));
+    localStorage.setItem('luckyDream.speechRate', String(settings.speechRate));
+
+    updateSpeechSettings({
+      speakerEnabled: settings.speakerEnabled,
+      speechVolume: settings.speechVolume,
+      speechRate: settings.speechRate,
+    });
   }, [settings]);
 
   const [calibration, setCalibration] = useState<EyeCalibrationData>({
@@ -837,6 +863,20 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     setSettings(prev => ({ ...prev, soundFeedback: enabled }));
   }, []);
 
+  const setSpeakerEnabled = useCallback((enabled: boolean) => {
+    setSettings(prev => ({ ...prev, speakerEnabled: enabled }));
+  }, []);
+
+  const setSpeechVolume = useCallback((volume: number) => {
+    const clamped = Math.max(0, Math.min(1, volume));
+    setSettings(prev => ({ ...prev, speechVolume: clamped }));
+  }, []);
+
+  const setSpeechRate = useCallback((rate: number) => {
+    const clamped = Math.max(0.7, Math.min(1.5, rate));
+    setSettings(prev => ({ ...prev, speechRate: clamped }));
+  }, []);
+
   const [isKeyboardOpen, setKeyboardOpen] = useState(false);
 
   // Stable Memoized Settings Context Value (Never re-renders during normal eye tracking)
@@ -853,6 +893,9 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     setEyeControlEnabled,
     setSimulatorMode,
     setSoundFeedback,
+    setSpeakerEnabled,
+    setSpeechVolume,
+    setSpeechRate,
     toggleCamera,
     startCalibration,
     calibrationStage,
@@ -874,6 +917,9 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     setEyeControlEnabled,
     setSimulatorMode,
     setSoundFeedback,
+    setSpeakerEnabled,
+    setSpeechVolume,
+    setSpeechRate,
     toggleCamera,
     startCalibration,
     registerGestureCallback,

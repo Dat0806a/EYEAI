@@ -132,9 +132,52 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
                 if (currRowIdx > 0) {
                   targetRowIdx = currRowIdx - 1;
                 } else {
-                  // WRAP TOP ROW TO BOTTOM ROW
-                  targetRowIdx = rows.length - 1;
-                  isWrap = true;
+                  // TOP KEYBOARD ROW + UP: DO NOT wrap to bottom row!
+                  // Exit keyboard upward to generic EyeFocusable above, or stay on current key if no candidate.
+                  const currRect = currNode.element.getBoundingClientRect();
+                  const currCenter = {
+                    x: currRect.width > 0 ? currRect.left + currRect.width / 2 : window.innerWidth / 2,
+                    y: currRect.height > 0 ? currRect.top + currRect.height / 2 : window.innerHeight,
+                  };
+
+                  const outsideNodes = allNodes.filter(n => n.groupId !== currNode.groupId && n.id !== currentId);
+                  let bestCandidateAbove: EyeFocusNode | null = null;
+                  let minDistance = Infinity;
+
+                  outsideNodes.forEach(node => {
+                    const rect = node.element.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0) return; // ignore invisible elements
+
+                    const center = {
+                      x: rect.left + rect.width / 2,
+                      y: rect.top + rect.height / 2,
+                    };
+
+                    const dy = center.y - currCenter.y;
+                    const dx = center.x - currCenter.x;
+
+                    // Candidate must be above current key
+                    if (dy < -5) {
+                      const dist = Math.hypot(dx, dy * 0.8);
+                      if (dist < minDistance) {
+                        minDistance = dist;
+                        bestCandidateAbove = node;
+                      }
+                    }
+                  });
+
+                  if (bestCandidateAbove) {
+                    if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
+                      console.log(`[KEYBOARD][NAV] TOP ROW UP -> Exit keyboard to: ${(bestCandidateAbove as EyeFocusNode).id}`);
+                    }
+                    return (bestCandidateAbove as EyeFocusNode).id;
+                  }
+
+                  // If no candidate above, stay on current key (never wrap to bottom row!)
+                  if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
+                    console.log(`[KEYBOARD][NAV] TOP ROW UP -> No candidate above, staying on: ${currentId}`);
+                  }
+                  return currentId;
                 }
               } else { // DOWN
                 if (currRowIdx < rows.length - 1) {
