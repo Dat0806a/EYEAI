@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { QWERTY_LAYOUT, NUMBERS_LAYOUT, PHRASES_LAYOUT } from './keyboardLayout';
 import { GridItem, VirtualKeyboardProps } from './types';
 import { EyeFocusable } from '../eye-control/EyeFocusable';
-import { ChevronDown, Delete, Send, Search } from 'lucide-react';
+import { ChevronDown, Delete, Send, Search, Volume2 } from 'lucide-react';
 import { useEyeTrackingSettings } from '../eye-control/useEyeTracking';
 
 export function VirtualKeyboard({
@@ -147,6 +147,7 @@ export function VirtualKeyboard({
                 const isSend = item.id.includes('send') || item.value === 'SEND';
                 const isBackspace = item.id.includes('backspace') || item.value === 'BACKSPACE';
                 const isToggle = item.value.startsWith('TOGGLE_');
+                const isSpeakAction = actionLabel === 'Nói' || actionLabel.includes('Nói');
 
                 // Dynamic Flex Widths for standard mobile composition
                 const flexStyle = isSpace
@@ -159,6 +160,10 @@ export function VirtualKeyboard({
 
                 const buttonLabel = isSend ? actionLabel : item.label;
 
+                const defaultSendBg = isSpeakAction
+                  ? 'bg-[#6AC9F0] text-[#14213D] border-[#14213D]/20 shadow-xs'
+                  : 'bg-[#FF6F61] text-white border-[#FF6F61]';
+
                 return (
                   <EyeFocusable
                     key={`${layoutMode}-${item.id}`}
@@ -168,7 +173,7 @@ export function VirtualKeyboard({
                     groupId="virtual-keyboard"
                     onSelect={() => handleKeyClick(item)}
                     className={`${flexStyle} min-w-0 h-[40px] sm:h-[46px] rounded-[8px] sm:rounded-[10px] bg-white text-[#14213D] font-extrabold text-sm sm:text-base border border-[#14213D]/15 shadow-2xs flex items-center justify-center active:scale-95 transition-transform ${
-                      item.colorClass || (isSend ? 'bg-[#FF6F61] text-white border-[#FF6F61]' : '')
+                      item.colorClass || (isSend ? defaultSendBg : '')
                     }`}
                   >
                     <button
@@ -178,6 +183,11 @@ export function VirtualKeyboard({
                     >
                       {isBackspace ? (
                         <Delete className="w-4 h-4 sm:w-5 sm:h-5 text-amber-900" />
+                      ) : isSend && isSpeakAction ? (
+                        <div className="flex items-center gap-1 text-[#14213D] font-black text-xs sm:text-sm">
+                          <Volume2 className="w-4 h-4 text-[#14213D]" />
+                          <span>{buttonLabel}</span>
+                        </div>
                       ) : isSend && actionLabel === 'Tìm' ? (
                         <div className="flex items-center gap-1 text-white font-black text-xs sm:text-sm">
                           <Search className="w-3.5 h-3.5" />

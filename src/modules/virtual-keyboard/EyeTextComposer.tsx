@@ -101,8 +101,18 @@ export function EyeTextComposer({
           onSelect={onSubmit}
           className="flex-1"
         >
-          <div className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-[14px] bg-[#FF6F61] hover:bg-[#FF6F61]/90 text-white font-black text-xs sm:text-sm shadow-xs min-h-[44px]">
-            <Send className="w-4 h-4 fill-white" />
+          <div
+            className={`flex items-center justify-center gap-1.5 py-2 px-4 rounded-[14px] font-black text-xs sm:text-sm shadow-xs min-h-[44px] ${
+              actionLabel.includes('Nói')
+                ? 'bg-[#6AC9F0] hover:bg-[#52BBE6] text-[#14213D] border border-[#14213D]/20'
+                : 'bg-[#FF6F61] hover:bg-[#FF6F61]/90 text-white'
+            }`}
+          >
+            {actionLabel.includes('Nói') ? (
+              <Volume2 className="w-4 h-4 text-[#14213D]" />
+            ) : (
+              <Send className="w-4 h-4 fill-white" />
+            )}
             <span>{actionLabel}</span>
           </div>
         </EyeFocusable>

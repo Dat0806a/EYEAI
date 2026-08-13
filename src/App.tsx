@@ -11,6 +11,7 @@ import { EntertainmentPage } from './pages/EntertainmentPage';
 import { LocationPage } from './pages/LocationPage';
 import { ContactsPage } from './pages/ContactsPage';
 import { HumanChatPage } from './pages/HumanChatPage';
+import { SpeakPage } from './pages/SpeakPage';
 import EyeTalkDashboard from './components/EyeTalkDashboard';
 import { motion, AnimatePresence } from 'motion/react';
 import { BackgroundVideo } from './components/ui/BackgroundVideo';
@@ -18,6 +19,7 @@ import { AudioUnlockBanner } from './components/ui/AudioUnlockBanner';
 
 export type AppRoute =
   | 'home'
+  | 'speak'
   | 'settings'
   | 'ai'
   | 'sos'
@@ -73,6 +75,18 @@ export default function App() {
                     transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                   >
                     <HomePage onNavigate={navigateTo} />
+                  </motion.div>
+                )}
+
+                {currentRoute === 'speak' && (
+                  <motion.div
+                    key="page-speak"
+                    initial={{ opacity: 0, x: 12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 12 }}
+                    transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                  >
+                    <SpeakPage onBack={() => navigateTo('home')} />
                   </motion.div>
                 )}
 

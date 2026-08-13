@@ -1,6 +1,7 @@
 import React from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { FeatureCard } from '../components/ui/FeatureCard';
+import { SpeakHeroCard } from '../components/home/SpeakHeroCard';
 import { SosHeroCard } from '../components/home/SosHeroCard';
 import { EntertainmentVisual } from '../components/home/EntertainmentVisual';
 import { LocationVisual } from '../components/home/LocationVisual';
@@ -20,7 +21,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       <PageHeader onOpenSettings={() => onNavigate('settings')} />
 
       {/* Main Mobile Portrait Content Container */}
-      <main className="flex-1 max-w-md md:max-w-xl mx-auto w-full px-4 sm:px-6 py-4 sm:py-6 flex flex-col justify-center gap-5 sm:gap-6 z-10">
+      <main className="flex-1 max-w-md md:max-w-xl mx-auto w-full px-4 sm:px-6 py-4 sm:py-6 flex flex-col justify-center gap-4 sm:gap-5 z-10">
         
         {/* Subtle Minimal Reassuring Prompt Bar */}
         <motion.div
@@ -40,6 +41,20 @@ export function HomePage({ onNavigate }: HomePageProps) {
           </span>
         </motion.div>
 
+        {/* Primary Full-Width Action: Speak to People Around */}
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full"
+        >
+          <SpeakHeroCard
+            row={0}
+            col={0}
+            onClick={() => onNavigate('speak')}
+          />
+        </motion.div>
+
         {/* 2-Column Primary Feature Grid with Distinct Visual Mini-Scenes */}
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
@@ -53,7 +68,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             title="Giải trí"
             description="Sách, radio & âm nhạc"
             visualNode={<EntertainmentVisual />}
-            row={0}
+            row={1}
             col={0}
             railColor="from-[#6AC9F0] via-[#6AC9F0]/50 to-transparent"
             onClick={() => onNavigate('entertainment')}
@@ -65,7 +80,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             title="Vị trí"
             description="Bản đồ & Định vị người thân"
             visualNode={<LocationVisual />}
-            row={0}
+            row={1}
             col={1}
             railColor="from-[#6AC9F0] via-emerald-400/50 to-transparent"
             onClick={() => onNavigate('location')}
@@ -77,7 +92,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             title="Liên lạc"
             description="Người thân & Gọi khẩn"
             visualNode={<ContactsVisual />}
-            row={1}
+            row={2}
             col={0}
             railColor="from-[#FF6F61]/80 via-[#6AC9F0]/40 to-transparent"
             onClick={() => onNavigate('contacts')}
@@ -89,7 +104,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             title="AI Trợ lý"
             description="Trò chuyện & Hỗ trợ"
             visualNode={<AiVisual />}
-            row={1}
+            row={2}
             col={1}
             railColor="from-purple-400/80 via-[#6AC9F0]/50 to-transparent"
             onClick={() => onNavigate('ai')}
@@ -104,7 +119,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
           className="w-full mt-0.5"
         >
           <SosHeroCard
-            row={2}
+            row={3}
             col={0}
             onClick={() => onNavigate('sos')}
           />
