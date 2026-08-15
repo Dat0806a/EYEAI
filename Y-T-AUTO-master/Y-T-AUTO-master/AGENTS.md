@@ -1,0 +1,23 @@
+﻿# Autonomous Product Workflow
+
+- Continue until all acceptance criteria are satisfied or a genuine blocker requires user action.
+- Prefer a complete end-to-end product over many incomplete features.
+- Never mark mocked functionality as complete.
+- Never fake OCR, API, AI, authentication, persistence, tests, screenshots or integrations.
+- Every independent product feature must have its own docs/features/<FEATURE>.md file.
+- Every structured AI/API output must have a physical JSON Schema contract.
+- Every JSON contract must have a valid synthetic example.
+- Keep JSON Schema, TypeScript types, runtime validators, API specification and frontend consumers synchronized.
+- Run contract tests whenever structured contracts change.
+- GitHub repository ntc0407/Y-T-AUTO is the source of truth.
+- Never overwrite newer GitHub source with stale Figma Make or Google AI Studio code.
+- Never force push.
+- Never commit secrets, tokens, cookies, passwords or .env files.
+- Run lint, typecheck, tests and production build after significant changes.
+- Verify desktop and mobile layouts in a real browser when capability exists.
+- Retry recoverable failures using different approaches.
+- Record assumptions, decisions, blockers, contracts, tests and progress in PROJECT_STATUS.md.
+- OCR results must be reviewed and confirmed before analysis.
+- Medical output is informational and must not be presented as a definitive diagnosis.
+- Never hallucinate medical reference ranges or external URLs.
+- Ask for direct user action only when unavoidable authentication, CAPTCHA, payment, billing, publishing, sensitive permission or irreversible action requires it.

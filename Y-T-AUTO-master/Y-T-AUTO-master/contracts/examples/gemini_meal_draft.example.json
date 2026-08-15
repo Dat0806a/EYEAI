@@ -1,0 +1,46 @@
+{
+  "title": "Thực đơn cân đối trong ngày",
+  "description": "Gợi ý năm bữa hỗ trợ dinh dưỡng đa dạng và dễ chuẩn bị.",
+  "items": [
+    {
+      "mealType": "BREAKFAST",
+      "name": "Bánh mì nguyên cám và trứng",
+      "description": "Bữa sáng cân đối với tinh bột nguyên cám và protein.",
+      "ingredients": "Bánh mì nguyên cám, trứng và rau tươi",
+      "preparation": "Nướng bánh mì, làm chín trứng với ít dầu và dùng cùng rau.",
+      "rationale": "Cung cấp năng lượng, protein và chất xơ cho buổi sáng."
+    },
+    {
+      "mealType": "LUNCH",
+      "name": "Cơm và cá hấp",
+      "description": "Bữa trưa gồm cơm, cá và rau xanh.",
+      "ingredients": "Cơm, cá tươi, rau xanh và gừng",
+      "preparation": "Nấu cơm, hấp cá với gừng và luộc rau.",
+      "rationale": "Bổ sung protein và chất xơ trong một bữa ăn cân đối."
+    },
+    {
+      "mealType": "DINNER",
+      "name": "Canh rau củ đậu hũ",
+      "description": "Bữa tối nhẹ với rau củ và protein thực vật.",
+      "ingredients": "Rau củ theo mùa, đậu hũ non và hành lá",
+      "preparation": "Nấu mềm rau củ rồi thêm đậu hũ non vào sau cùng.",
+      "rationale": "Dễ tiêu hóa và bổ sung vitamin cùng protein thực vật."
+    },
+    {
+      "mealType": "SNACK",
+      "name": "Trái cây và hạt",
+      "description": "Bữa phụ nhỏ với trái cây tươi và hạt không muối.",
+      "ingredients": "Táo và hạnh nhân không muối",
+      "preparation": "Rửa sạch, cắt táo và dùng cùng một phần nhỏ hạnh nhân.",
+      "rationale": "Bổ sung chất xơ và chất béo tốt giữa hai bữa chính."
+    },
+    {
+      "mealType": "DRINK",
+      "name": "Trà xanh ít đường",
+      "description": "Đồ uống nhẹ dùng để bổ sung nước trong ngày.",
+      "ingredients": "Lá trà xanh và nước nóng",
+      "preparation": "Hãm trà với nước nóng và không thêm đường.",
+      "rationale": "Giúp bổ sung nước mà không thêm nhiều đường."
+    }
+  ]
+}

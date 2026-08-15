@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OCRConfirm",
+  "type": "object",
+  "required": ["reportId", "results"],
+  "properties": {
+    "reportId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["testCode", "testName", "value", "unit"],
+        "properties": {
+          "testCode": {
+            "type": "string"
+          },
+          "testName": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "referenceRange": {
+            "type": "object",
+            "required": ["low", "high", "text"],
+            "properties": {
+              "low": {
+                "type": ["number", "null"]
+              },
+              "high": {
+                "type": ["number", "null"]
+              },
+              "text": {
+                "type": ["string", "null"]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

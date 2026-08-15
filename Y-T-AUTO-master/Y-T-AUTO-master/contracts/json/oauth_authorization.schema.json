@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OAuthAuthorization",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["provider", "authorizationUrl"],
+  "properties": {
+    "provider": { "type": "string", "enum": ["GOOGLE", "FACEBOOK"] },
+    "authorizationUrl": { "type": "string", "format": "uri" }
+  },
+  "oneOf": [
+    {
+      "required": ["provider", "authorizationUrl"],
+      "properties": {
+        "provider": { "const": "GOOGLE" },
+        "authorizationUrl": {
+          "pattern": "^https://accounts\\.google\\.com/o/oauth2/v2/auth(?:\\?[^#]*)?$"
+        }
+      }
+    },
+    {
+      "required": ["provider", "authorizationUrl"],
+      "properties": {
+        "provider": { "const": "FACEBOOK" },
+        "authorizationUrl": {
+          "pattern": "^https://www\\.facebook\\.com/v[0-9]+(?:\\.[0-9]+)?/dialog/oauth(?:\\?[^#]*)?$"
+        }
+      }
+    }
+  ]
+}

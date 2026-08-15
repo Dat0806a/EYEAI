@@ -1,0 +1,29 @@
+{
+  "success": true,
+  "results": [
+    {
+      "testCode": "WBC",
+      "testName": "Số lượng bạch cầu",
+      "value": 7.2,
+      "unit": "10^9/L",
+      "referenceRange": {
+        "low": 4.0,
+        "high": 10.0,
+        "text": "4.0 - 10.0"
+      },
+      "ocrConfidence": 0.96
+    },
+    {
+      "testCode": "RBC",
+      "testName": "Số lượng hồng cầu",
+      "value": 3.8,
+      "unit": "10^12/L",
+      "referenceRange": {
+        "low": 4.0,
+        "high": 5.5,
+        "text": "4.0 - 5.5"
+      },
+      "ocrConfidence": 0.94
+    }
+  ]
+}

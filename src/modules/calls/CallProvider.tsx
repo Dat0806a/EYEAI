@@ -708,7 +708,7 @@ function CallOverlayModal({
                   size="md"
                   fullWidth
                   onClick={onToggleMute}
-                  icon={isMuted ? <MicOff className="w-[#14213D] h-5" /> : <Mic className="w-5 h-5 text-[#14213D]" />}
+                  icon={isMuted ? <MicOff className="w-5 h-5 text-white" /> : <Mic className="w-5 h-5 text-[#14213D]" />}
                   row={0}
                   col={0}
                 >

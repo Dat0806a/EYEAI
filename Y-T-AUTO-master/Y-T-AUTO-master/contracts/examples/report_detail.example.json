@@ -1,0 +1,133 @@
+{
+  "id": "b69e421e-cfad-49fb-9da7-560f50f28d2e",
+  "overallSummary": "The confirmed result does not include a reference range, so this narrative is informational only.",
+  "results": [
+    {
+      "test_code": "TEST-001",
+      "test_name": "Synthetic test result",
+      "value": 1,
+      "unit": "unit",
+      "reference_low": null,
+      "reference_high": null,
+      "reference_text": null,
+      "status": "UNKNOWN",
+      "ocr_confidence": 1,
+      "explanation": "Synthetic test result (TEST-001) is 1 unit, and the report has no reference range for classification."
+    }
+  ],
+  "mealPlan": {
+    "reportId": "b69e421e-cfad-49fb-9da7-560f50f28d2e",
+    "title": "Supportive meal plan",
+    "description": "Informational meal suggestions based on confirmed results.",
+    "items": [
+      {
+        "mealType": "BREAKFAST",
+        "name": "Breakfast bowl",
+        "description": "A balanced breakfast bowl.",
+        "ingredients": "Whole grains, fruit, and unsalted seeds",
+        "preparation": "Combine the ingredients in a clean bowl.",
+        "rationale": "Provides a balanced mix of nutrients.",
+        "imageUrl": null,
+        "imageAlt": null,
+        "imageSourceUrl": null,
+        "imageLicense": null,
+        "imageAuthor": null,
+        "imageVerifiedAt": null
+      },
+      {
+        "mealType": "LUNCH",
+        "name": "Rice and vegetables",
+        "description": "A simple lunch with vegetables and protein.",
+        "ingredients": "Rice, vegetables, and tofu",
+        "preparation": "Cook thoroughly and serve warm.",
+        "rationale": "Combines energy, protein, and fiber.",
+        "imageUrl": null,
+        "imageAlt": null,
+        "imageSourceUrl": null,
+        "imageLicense": null,
+        "imageAuthor": null,
+        "imageVerifiedAt": null
+      },
+      {
+        "mealType": "DINNER",
+        "name": "Vegetable soup",
+        "description": "A light vegetable soup for dinner.",
+        "ingredients": "Seasonal vegetables and tofu",
+        "preparation": "Simmer until all ingredients are cooked.",
+        "rationale": "Offers a light meal with vegetables and protein.",
+        "imageUrl": null,
+        "imageAlt": null,
+        "imageSourceUrl": null,
+        "imageLicense": null,
+        "imageAuthor": null,
+        "imageVerifiedAt": null
+      },
+      {
+        "mealType": "SNACK",
+        "name": "Fruit and seeds",
+        "description": "A small fruit and seed snack.",
+        "ingredients": "Fresh fruit and unsalted seeds",
+        "preparation": "Wash the fruit and serve a small portion.",
+        "rationale": "Adds fiber between main meals.",
+        "imageUrl": null,
+        "imageAlt": null,
+        "imageSourceUrl": null,
+        "imageLicense": null,
+        "imageAuthor": null,
+        "imageVerifiedAt": null
+      },
+      {
+        "mealType": "DRINK",
+        "name": "Water",
+        "description": "Plain water served through the day.",
+        "ingredients": "Clean drinking water",
+        "preparation": "Serve at a comfortable temperature.",
+        "rationale": "Supports routine hydration.",
+        "imageUrl": null,
+        "imageAlt": null,
+        "imageSourceUrl": null,
+        "imageLicense": null,
+        "imageAuthor": null,
+        "imageVerifiedAt": null
+      }
+    ]
+  },
+  "exercisePlan": {
+    "reportId": "b69e421e-cfad-49fb-9da7-560f50f28d2e",
+    "title": "Supportive exercise plan",
+    "items": [
+      {
+        "name": "Comfortable walk",
+        "description": "Walk at a comfortable pace on a safe, level surface.",
+        "duration": 20,
+        "difficulty": "EASY",
+        "rationale": "Provides gentle, low-impact movement.",
+        "youtubeUrl": null,
+        "youtubeVideoId": null,
+        "youtubeTitle": null,
+        "youtubeAuthor": null,
+        "youtubeAuthorUrl": null,
+        "youtubeThumbnailUrl": null,
+        "youtubeVerified": false,
+        "youtubeSource": null,
+        "youtubeVerifiedAt": null
+      },
+      {
+        "name": "Gentle mobility",
+        "description": "Move slowly through a comfortable range of motion.",
+        "duration": 15,
+        "difficulty": "EASY",
+        "rationale": "Supports routine mobility and balance practice.",
+        "youtubeUrl": null,
+        "youtubeVideoId": null,
+        "youtubeTitle": null,
+        "youtubeAuthor": null,
+        "youtubeAuthorUrl": null,
+        "youtubeThumbnailUrl": null,
+        "youtubeVerified": false,
+        "youtubeSource": null,
+        "youtubeVerifiedAt": null
+      }
+    ]
+  }
+}

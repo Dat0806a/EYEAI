@@ -1,0 +1,38 @@
+{
+  "reportId": "b69e421e-cfad-49fb-9da7-560f50f28d2e",
+  "title": "Supportive exercise plan",
+  "items": [
+    {
+      "name": "Brisk walk at home",
+      "description": "Walk at a moderate pace to support cardiovascular endurance.",
+      "duration": 30,
+      "difficulty": "EASY",
+      "rationale": "Low-impact movement is suitable for most beginners.",
+      "youtubeUrl": "https://www.youtube.com/watch?v=u08lo0bESJc",
+      "youtubeVideoId": "u08lo0bESJc",
+      "youtubeTitle": "Heart Healthy - 1 Mile Walk | Walk at Home",
+      "youtubeAuthor": "Walk at Home",
+      "youtubeAuthorUrl": "https://www.youtube.com/@LeslieSansonesWalkatHome",
+      "youtubeThumbnailUrl": "https://i.ytimg.com/vi/u08lo0bESJc/hqdefault.jpg",
+      "youtubeVerified": true,
+      "youtubeSource": "YouTube oEmbed",
+      "youtubeVerifiedAt": "2026-08-09"
+    },
+    {
+      "name": "Gentle mobility exercise",
+      "description": "Move slowly through a comfortable range of motion.",
+      "duration": 15,
+      "difficulty": "EASY",
+      "rationale": "Gentle movement supports flexibility and balance.",
+      "youtubeUrl": null,
+      "youtubeVideoId": null,
+      "youtubeTitle": null,
+      "youtubeAuthor": null,
+      "youtubeAuthorUrl": null,
+      "youtubeThumbnailUrl": null,
+      "youtubeVerified": false,
+      "youtubeSource": null,
+      "youtubeVerifiedAt": null
+    }
+  ]
+}

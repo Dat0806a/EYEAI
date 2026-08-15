@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { AccountType } from '../types/account';
+
+export type RegistrationRole = AccountType;
 
 export interface UserProfile {
   id: string;
   display_name: string;
   avatar_url?: string | null;
+  account_type: AccountType | null;
+  role?: string | null;
 }
 
 export function useAuth() {
@@ -20,7 +25,7 @@ export function useAuth() {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id);
+        fetchProfile(session.user.id, session.user);
       } else {
         setLoading(false);
       }
@@ -31,7 +36,7 @@ export function useAuth() {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        await fetchProfile(session.user.id);
+        await fetchProfile(session.user.id, session.user);
       } else {
         setProfile(null);
         setLoading(false);
@@ -43,28 +48,94 @@ export function useAuth() {
     };
   }, []);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string, currentUser?: User | null) => {
+    const targetUser = currentUser || user;
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, display_name, avatar_url')
+        .select('*')
         .eq('id', userId)
         .single();
 
+      const metaRole = (targetUser?.user_metadata?.account_type || targetUser?.user_metadata?.role) as AccountType | undefined;
+
       if (!error && data) {
-        setProfile(data);
+        const rawType = data.account_type || data.role || metaRole;
+        const validAccountType: AccountType | null =
+          rawType === 'impaired' || rawType === 'patient' ? rawType : null;
+
+        setProfile({
+          id: data.id,
+          display_name: data.display_name,
+          avatar_url: data.avatar_url,
+          role: validAccountType,
+          account_type: validAccountType,
+        });
       } else {
         // Fallback profile if user profile row isn't fetched yet
+        const validMetaType: AccountType | null =
+          metaRole === 'impaired' || metaRole === 'patient' ? metaRole : null;
+
         setProfile({
           id: userId,
-          display_name: user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Người dùng',
-          avatar_url: user?.user_metadata?.avatar_url || null,
+          display_name: targetUser?.user_metadata?.display_name || targetUser?.email?.split('@')[0] || 'Người dùng',
+          avatar_url: targetUser?.user_metadata?.avatar_url || null,
+          role: validMetaType,
+          account_type: validMetaType,
         });
       }
     } catch {
       // Ignore
     } finally {
       setLoading(false);
+    }
+  };
+
+  const updateAccountType = async (newType: AccountType): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Chưa đăng nhập' };
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ account_type: newType, role: newType })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      setProfile((prev) => (prev ? { ...prev, account_type: newType, role: newType } : null));
+
+      await supabase.auth.updateUser({
+        data: { account_type: newType, role: newType },
+      });
+
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Không thể cập nhật loại tài khoản.';
+      return { success: false, error: msg };
+    }
+  };
+
+  const updateDisplayName = async (newName: string): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Chưa đăng nhập' };
+    const trimmed = newName.trim();
+    if (!trimmed) return { success: false, error: 'Tên không được để trống.' };
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ display_name: trimmed })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      setProfile((prev) => (prev ? { ...prev, display_name: trimmed } : null));
+
+      await supabase.auth.updateUser({
+        data: { display_name: trimmed },
+      });
+
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Không thể cập nhật tên hiển thị.';
+      return { success: false, error: msg };
     }
   };
 
@@ -80,6 +151,9 @@ export function useAuth() {
     isAuthenticated: !!user,
     userId: user?.id || null,
     signOut,
-    refreshProfile: () => user && fetchProfile(user.id),
+    updateAccountType,
+    updateDisplayName,
+    refreshProfile: () => user && fetchProfile(user.id, user),
   };
 }
+

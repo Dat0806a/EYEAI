@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HistoryList",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reports"],
+  "properties": {
+    "reports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "image_reference", "status", "source_type", "created_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "image_reference": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["PENDING", "PROCESSED", "FAILED"] },
+          "source_type": { "type": "string", "enum": ["CAMERA", "UPLOAD"] },
+          "created_at": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

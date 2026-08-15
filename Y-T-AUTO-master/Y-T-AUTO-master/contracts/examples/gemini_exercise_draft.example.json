@@ -1,0 +1,19 @@
+{
+  "title": "Supportive exercise plan",
+  "items": [
+    {
+      "name": "Brisk walking",
+      "description": "Walk at a comfortable, steady pace.",
+      "duration": 20,
+      "difficulty": "EASY",
+      "rationale": "Gentle aerobic movement supports general cardiovascular fitness."
+    },
+    {
+      "name": "Beginner mobility routine",
+      "description": "Move slowly through a comfortable range of motion.",
+      "duration": 15,
+      "difficulty": "EASY",
+      "rationale": "Controlled movement supports flexibility and balance."
+    }
+  ]
+}

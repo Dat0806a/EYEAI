@@ -1,0 +1,39 @@
+{
+  "reportId": "b69e421e-cfad-49fb-9da7-560f50f28d2e",
+  "overallSummary": "Có một chỉ số nằm ngoài khoảng tham chiếu trên phiếu. Đây là thông tin tham khảo, không phải chẩn đoán.",
+  "results": [
+    {
+      "testCode": "WBC",
+      "testName": "Số lượng bạch cầu",
+      "value": 7.2,
+      "unit": "10^9/L",
+      "referenceLow": 4,
+      "referenceHigh": 10,
+      "referenceText": "4 - 10",
+      "status": "NORMAL",
+      "explanation": "Chỉ số nằm trong khoảng tham chiếu được ghi trên phiếu xét nghiệm."
+    },
+    {
+      "testCode": "RBC",
+      "testName": "Số lượng hồng cầu",
+      "value": 3.8,
+      "unit": "10^12/L",
+      "referenceLow": 4,
+      "referenceHigh": 5.5,
+      "referenceText": "4 - 5.5",
+      "status": "LOW",
+      "explanation": "Chỉ số thấp hơn cận dưới trên phiếu; nên trao đổi với bác sĩ nếu cần đánh giá thêm."
+    },
+    {
+      "testCode": "CRP",
+      "testName": "C-reactive protein",
+      "value": 2.1,
+      "unit": "mg/L",
+      "referenceLow": null,
+      "referenceHigh": null,
+      "referenceText": null,
+      "status": "UNKNOWN",
+      "explanation": "Không có khoảng tham chiếu trên phiếu nên chưa đủ dữ liệu để phân loại chỉ số."
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MealPlan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reportId", "title", "description", "items"],
+  "properties": {
+    "reportId": { "type": "string", "format": "uuid" },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "items": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "allOf": [
+        { "contains": { "properties": { "mealType": { "const": "BREAKFAST" } }, "required": ["mealType"] } },
+        { "contains": { "properties": { "mealType": { "const": "LUNCH" } }, "required": ["mealType"] } },
+        { "contains": { "properties": { "mealType": { "const": "DINNER" } }, "required": ["mealType"] } },
+        { "contains": { "properties": { "mealType": { "const": "SNACK" } }, "required": ["mealType"] } },
+        { "contains": { "properties": { "mealType": { "const": "DRINK" } }, "required": ["mealType"] } }
+      ],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mealType",
+          "name",
+          "description",
+          "ingredients",
+          "preparation",
+          "rationale",
+          "imageUrl",
+          "imageAlt",
+          "imageSourceUrl",
+          "imageLicense",
+          "imageAuthor",
+          "imageVerifiedAt"
+        ],
+        "properties": {
+          "mealType": { "type": "string", "enum": ["BREAKFAST", "LUNCH", "DINNER", "SNACK", "DRINK"] },
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "ingredients": { "type": "string", "minLength": 1 },
+          "preparation": { "type": "string", "minLength": 1 },
+          "rationale": { "type": "string", "minLength": 1 },
+          "imageUrl": { "type": ["string", "null"], "format": "uri" },
+          "imageAlt": { "type": ["string", "null"] },
+          "imageSourceUrl": { "type": ["string", "null"], "format": "uri" },
+          "imageLicense": { "type": ["string", "null"] },
+          "imageAuthor": { "type": ["string", "null"] },
+          "imageVerifiedAt": { "type": ["string", "null"], "format": "date" }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "imageUrl": { "const": "https://upload.wikimedia.org/wikipedia/commons/6/65/Beef_noodle_soup_%28Ph%E1%BB%9F_b%C3%B2%29_-_Pho_Hanoi_Authentic_2024-12-01.jpg" },
+              "imageAlt": { "const": "Bát phở bò Hà Nội với thịt bò và rau xanh" },
+              "imageSourceUrl": { "const": "https://commons.wikimedia.org/wiki/File:Beef_noodle_soup_(Ph%E1%BB%9F_b%C3%B2)_-_Pho_Hanoi_Authentic_2024-12-01.jpg" },
+              "imageLicense": { "const": "CC0" },
+              "imageAuthor": { "const": "Andy Li" },
+              "imageVerifiedAt": { "const": "2026-08-09" }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": { "const": "https://upload.wikimedia.org/wikipedia/commons/4/49/Healthy_egg_and_toasted_bread_breakfast.jpg" },
+              "imageAlt": { "const": "Bữa sáng với trứng, bánh mì nướng và rau tươi" },
+              "imageSourceUrl": { "const": "https://commons.wikimedia.org/wiki/File:Healthy_egg_and_toasted_bread_breakfast.jpg" },
+              "imageLicense": { "const": "CC BY-SA 4.0" },
+              "imageAuthor": { "const": "Deborah Tjituka" },
+              "imageVerifiedAt": { "const": "2026-08-09" }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": { "const": "https://upload.wikimedia.org/wikipedia/commons/0/06/Riz_blanc_au_poisson.jpg" },
+              "imageAlt": { "const": "Đĩa cơm trắng ăn cùng cá và rau xanh" },
+              "imageSourceUrl": { "const": "https://commons.wikimedia.org/wiki/File:Riz_blanc_au_poisson.jpg" },
+              "imageLicense": { "const": "CC BY-SA 4.0" },
+              "imageAuthor": { "const": "Cheikh cherif" },
+              "imageVerifiedAt": { "const": "2026-08-09" }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": { "const": "https://upload.wikimedia.org/wikipedia/commons/7/7c/-2022-02-01_Bowl_of_spring_vegetable_soup%2C_Trimingham%2C_Norfolk.JPG" },
+              "imageAlt": { "const": "Bát canh rau củ mùa xuân dùng cho bữa tối" },
+              "imageSourceUrl": { "const": "https://commons.wikimedia.org/wiki/File:-2022-02-01_Bowl_of_spring_vegetable_soup,_Trimingham,_Norfolk.JPG" },
+              "imageLicense": { "const": "CC BY-SA 4.0" },
+              "imageAuthor": { "const": "Kolforn" },
+              "imageVerifiedAt": { "const": "2026-08-09" }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": { "const": "https://upload.wikimedia.org/wikipedia/commons/4/4c/Nuts_and_Fruit_%28Unsplash%29.jpg" },
+              "imageAlt": { "const": "Trái cây tươi và các loại hạt dùng cho bữa phụ" },
+              "imageSourceUrl": { "const": "https://commons.wikimedia.org/wiki/File:Nuts_and_Fruit_(Unsplash).jpg" },
+              "imageLicense": { "const": "CC0" },
+              "imageAuthor": { "const": "Roberta Sorge" },
+              "imageVerifiedAt": { "const": "2026-08-09" }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": { "const": "https://upload.wikimedia.org/wikipedia/commons/a/a8/Cup_of_Green_Tea_and_Snacks.jpg" },
+              "imageAlt": { "const": "Tách trà xanh ít đường dùng cùng đồ ăn nhẹ" },
+              "imageSourceUrl": { "const": "https://commons.wikimedia.org/wiki/File:Cup_of_Green_Tea_and_Snacks.jpg" },
+              "imageLicense": { "const": "CC BY-SA 4.0" },
+              "imageAuthor": { "const": "Major Lyte" },
+              "imageVerifiedAt": { "const": "2026-08-09" }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": { "type": "null" },
+              "imageAlt": { "type": "null" },
+              "imageSourceUrl": { "type": "null" },
+              "imageLicense": { "type": "null" },
+              "imageAuthor": { "type": "null" },
+              "imageVerifiedAt": { "type": "null" }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

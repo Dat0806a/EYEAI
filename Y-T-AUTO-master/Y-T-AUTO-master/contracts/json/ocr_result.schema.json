@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OCRResult",
+  "type": "object",
+  "required": ["success", "results"],
+  "properties": {
+    "success": {
+      "type": "boolean"
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["testCode", "testName", "value", "unit", "ocrConfidence"],
+        "properties": {
+          "testCode": {
+            "type": "string"
+          },
+          "testName": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "referenceRange": {
+            "type": "object",
+            "properties": {
+              "low": {
+                "type": ["number", "null"]
+              },
+              "high": {
+                "type": ["number", "null"]
+              },
+              "text": {
+                "type": ["string", "null"]
+              }
+            }
+          },
+          "ocrConfidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0
+          }
+        }
+      }
+    }
+  }
+}

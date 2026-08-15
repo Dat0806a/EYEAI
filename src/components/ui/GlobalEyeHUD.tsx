@@ -15,6 +15,12 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
   const { settings, setEyeControlEnabled, isKeyboardOpen } = useEyeTrackingSettings();
   const { trackingState } = useEyeTrackingTelemetry();
 
+  // Do not render Camera HUD on Auth / Login / Register screens
+  const isAuthRoute = currentRoute === 'auth' || currentRoute === 'login' || currentRoute === 'register';
+  if (isAuthRoute) {
+    return null;
+  }
+
   // Human Chat ('chat') and AI Chat ('ai') convert to long bar mode immediately
   const isChatRoute = currentRoute === 'chat' || currentRoute === 'ai';
   const shouldRenderLongBar = isChatRoute || isKeyboardOpen;

@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AuthMe",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["userId", "hasProfile", "profile", "phone"],
+  "properties": {
+    "userId": { "type": "string", "format": "uuid" },
+    "hasProfile": { "type": "boolean" },
+    "profile": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "user_id", "full_name", "date_of_birth", "gender"],
+          "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "user_id": { "type": "string", "format": "uuid" },
+            "full_name": { "type": "string", "minLength": 1, "pattern": "\\S" },
+            "date_of_birth": { "type": "string", "format": "date" },
+            "gender": { "type": "string", "enum": ["MALE", "FEMALE", "OTHER"] }
+          }
+        },
+        { "type": "null" }
+      ]
+    },
+    "phone": { "$ref": "phone_account_status.schema.json" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "hasProfile": { "const": false } } },
+      "then": { "properties": { "profile": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "hasProfile": { "const": true } } },
+      "then": { "properties": { "profile": { "type": "object" } } }
+    }
+  ]
+}

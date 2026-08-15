@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GeminiMealDraft",
+  "description": "Internal structured output accepted from Gemini before trusted image provenance is attached.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "description", "items"],
+  "properties": {
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "items": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "allOf": [
+        { "contains": { "properties": { "mealType": { "const": "BREAKFAST" } }, "required": ["mealType"] } },
+        { "contains": { "properties": { "mealType": { "const": "LUNCH" } }, "required": ["mealType"] } },
+        { "contains": { "properties": { "mealType": { "const": "DINNER" } }, "required": ["mealType"] } },
+        { "contains": { "properties": { "mealType": { "const": "SNACK" } }, "required": ["mealType"] } },
+        { "contains": { "properties": { "mealType": { "const": "DRINK" } }, "required": ["mealType"] } }
+      ],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mealType", "name", "description", "ingredients", "preparation", "rationale"],
+        "properties": {
+          "mealType": { "type": "string", "enum": ["BREAKFAST", "LUNCH", "DINNER", "SNACK", "DRINK"] },
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "ingredients": { "type": "string", "minLength": 1 },
+          "preparation": { "type": "string", "minLength": 1 },
+          "rationale": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

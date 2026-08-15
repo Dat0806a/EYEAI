@@ -1,0 +1,77 @@
+{
+  "reportId": "b69e421e-cfad-49fb-9da7-560f50f28d2e",
+  "title": "Thực đơn gợi ý hỗ trợ sức khỏe",
+  "description": "Thực đơn hỗ trợ dựa trên kết quả đã xác nhận; đây không phải phác đồ điều trị.",
+  "items": [
+    {
+      "mealType": "BREAKFAST",
+      "name": "Phở bò rau xanh",
+      "description": "Phở bò rau xanh là bữa sáng ấm với thịt bò và rau ăn kèm.",
+      "ingredients": "Bánh phở, thịt bò nạc, hành lá, rau thơm và nước dùng ít muối",
+      "preparation": "Trụng bánh phở, xếp thịt bò và rau vào bát rồi chan nước dùng nóng.",
+      "rationale": "Thịt bò cung cấp sắt và protein; rau xanh bổ sung vitamin và chất xơ.",
+      "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/6/65/Beef_noodle_soup_%28Ph%E1%BB%9F_b%C3%B2%29_-_Pho_Hanoi_Authentic_2024-12-01.jpg",
+      "imageAlt": "Bát phở bò Hà Nội với thịt bò và rau xanh",
+      "imageSourceUrl": "https://commons.wikimedia.org/wiki/File:Beef_noodle_soup_(Ph%E1%BB%9F_b%C3%B2)_-_Pho_Hanoi_Authentic_2024-12-01.jpg",
+      "imageLicense": "CC0",
+      "imageAuthor": "Andy Li",
+      "imageVerifiedAt": "2026-08-09"
+    },
+    {
+      "mealType": "LUNCH",
+      "name": "Cơm, cá và rau xanh",
+      "description": "Bữa trưa cân đối giữa tinh bột, đạm và chất xơ.",
+      "ingredients": "Cơm, cá tươi, rau xanh, gừng và gia vị ít muối",
+      "preparation": "Nấu cơm, hấp cá với gừng và luộc rau xanh.",
+      "rationale": "Cá cung cấp protein và rau xanh cung cấp chất xơ.",
+      "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/0/06/Riz_blanc_au_poisson.jpg",
+      "imageAlt": "Đĩa cơm trắng ăn cùng cá và rau xanh",
+      "imageSourceUrl": "https://commons.wikimedia.org/wiki/File:Riz_blanc_au_poisson.jpg",
+      "imageLicense": "CC BY-SA 4.0",
+      "imageAuthor": "Cheikh cherif",
+      "imageVerifiedAt": "2026-08-09"
+    },
+    {
+      "mealType": "DINNER",
+      "name": "Canh rau củ và đậu hũ non",
+      "description": "Bữa tối nhẹ với canh rau củ và protein thực vật.",
+      "ingredients": "Rau củ theo mùa, đậu hũ non và hành lá",
+      "preparation": "Nấu mềm rau củ rồi thêm đậu hũ non vào sau cùng.",
+      "rationale": "Rau củ bổ sung chất xơ và đậu hũ cung cấp protein thực vật.",
+      "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/7/7c/-2022-02-01_Bowl_of_spring_vegetable_soup%2C_Trimingham%2C_Norfolk.JPG",
+      "imageAlt": "Bát canh rau củ mùa xuân dùng cho bữa tối",
+      "imageSourceUrl": "https://commons.wikimedia.org/wiki/File:-2022-02-01_Bowl_of_spring_vegetable_soup,_Trimingham,_Norfolk.JPG",
+      "imageLicense": "CC BY-SA 4.0",
+      "imageAuthor": "Kolforn",
+      "imageVerifiedAt": "2026-08-09"
+    },
+    {
+      "mealType": "SNACK",
+      "name": "Trái cây tươi và các loại hạt",
+      "description": "Bữa phụ với trái cây tươi và hạt không muối.",
+      "ingredients": "Táo, chuối hoặc quả mọng và hạt không muối",
+      "preparation": "Rửa sạch, cắt trái cây và dùng cùng một phần nhỏ hạt.",
+      "rationale": "Bổ sung chất xơ và chất béo tốt giữa hai bữa chính.",
+      "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/4/4c/Nuts_and_Fruit_%28Unsplash%29.jpg",
+      "imageAlt": "Trái cây tươi và các loại hạt dùng cho bữa phụ",
+      "imageSourceUrl": "https://commons.wikimedia.org/wiki/File:Nuts_and_Fruit_(Unsplash).jpg",
+      "imageLicense": "CC0",
+      "imageAuthor": "Roberta Sorge",
+      "imageVerifiedAt": "2026-08-09"
+    },
+    {
+      "mealType": "DRINK",
+      "name": "Nước lọc / trà xanh ít đường",
+      "description": "Đồ uống nhẹ giúp bổ sung nước trong ngày.",
+      "ingredients": "Nước lọc hoặc lá trà xanh và nước nóng",
+      "preparation": "Hãm trà với nước nóng và không thêm đường.",
+      "rationale": "Bổ sung nước mà không thêm nhiều đường.",
+      "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a8/Cup_of_Green_Tea_and_Snacks.jpg",
+      "imageAlt": "Tách trà xanh ít đường dùng cùng đồ ăn nhẹ",
+      "imageSourceUrl": "https://commons.wikimedia.org/wiki/File:Cup_of_Green_Tea_and_Snacks.jpg",
+      "imageLicense": "CC BY-SA 4.0",
+      "imageAuthor": "Major Lyte",
+      "imageVerifiedAt": "2026-08-09"
+    }
+  ]
+}

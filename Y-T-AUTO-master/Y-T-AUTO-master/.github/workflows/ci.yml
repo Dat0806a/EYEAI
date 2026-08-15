@@ -1,0 +1,47 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: 'npm'
+        cache-dependency-path: |
+          backend/package-lock.json
+          frontend/package-lock.json
+
+    - name: Install Backend Dependencies
+      working-directory: backend
+      run: npm ci
+
+    - name: Run Backend Tests
+      working-directory: backend
+      run: npm test -- --ci
+
+    - name: Build Backend
+      working-directory: backend
+      run: npm run build
+
+    - name: Install Frontend Dependencies
+      working-directory: frontend
+      run: npm ci
+
+    - name: Run Frontend Tests
+      working-directory: frontend
+      run: npm test -- --run
+
+    - name: Build Frontend
+      working-directory: frontend
+      run: npm run build

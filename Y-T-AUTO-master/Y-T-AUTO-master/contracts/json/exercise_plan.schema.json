@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExercisePlan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reportId", "title", "items"],
+  "properties": {
+    "reportId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "items": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "description",
+          "duration",
+          "difficulty",
+          "rationale",
+          "youtubeUrl",
+          "youtubeVideoId",
+          "youtubeTitle",
+          "youtubeAuthor",
+          "youtubeAuthorUrl",
+          "youtubeThumbnailUrl",
+          "youtubeVerified",
+          "youtubeSource",
+          "youtubeVerifiedAt"
+        ],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "duration": { "type": "integer", "minimum": 1, "maximum": 120 },
+          "difficulty": {
+            "type": "string",
+            "enum": ["EASY", "MEDIUM", "HARD"]
+          },
+          "rationale": { "type": "string", "minLength": 1 },
+          "youtubeUrl": { "type": ["string", "null"], "format": "uri" },
+          "youtubeVideoId": { "type": ["string", "null"] },
+          "youtubeTitle": { "type": ["string", "null"] },
+          "youtubeAuthor": { "type": ["string", "null"] },
+          "youtubeAuthorUrl": { "type": ["string", "null"], "format": "uri" },
+          "youtubeThumbnailUrl": { "type": ["string", "null"], "format": "uri" },
+          "youtubeVerified": { "type": "boolean" },
+          "youtubeSource": { "type": ["string", "null"] },
+          "youtubeVerifiedAt": { "type": ["string", "null"], "format": "date" }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "youtubeVerified": { "const": true } },
+              "required": ["youtubeVerified"]
+            },
+            "then": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "youtubeUrl": { "const": "https://www.youtube.com/watch?v=u08lo0bESJc" },
+                    "youtubeVideoId": { "const": "u08lo0bESJc" },
+                    "youtubeTitle": { "const": "Heart Healthy - 1 Mile Walk | Walk at Home" },
+                    "youtubeAuthor": { "const": "Walk at Home" },
+                    "youtubeAuthorUrl": { "const": "https://www.youtube.com/@LeslieSansonesWalkatHome" },
+                    "youtubeThumbnailUrl": { "const": "https://i.ytimg.com/vi/u08lo0bESJc/hqdefault.jpg" },
+                    "youtubeVerified": { "const": true },
+                    "youtubeSource": { "const": "YouTube oEmbed" },
+                    "youtubeVerifiedAt": { "const": "2026-08-09" }
+                  }
+                },
+                {
+                  "properties": {
+                    "youtubeUrl": { "const": "https://www.youtube.com/watch?v=v7AYKMP6rOE" },
+                    "youtubeVideoId": { "const": "v7AYKMP6rOE" },
+                    "youtubeTitle": { "const": "Yoga For Complete Beginners - 20 Minute Home Yoga Workout!" },
+                    "youtubeAuthor": { "const": "Yoga With Adriene" },
+                    "youtubeAuthorUrl": { "const": "https://www.youtube.com/@yogawithadriene" },
+                    "youtubeThumbnailUrl": { "const": "https://i.ytimg.com/vi/v7AYKMP6rOE/hqdefault.jpg" },
+                    "youtubeVerified": { "const": true },
+                    "youtubeSource": { "const": "YouTube oEmbed" },
+                    "youtubeVerifiedAt": { "const": "2026-08-09" }
+                  }
+                },
+                {
+                  "properties": {
+                    "youtubeUrl": { "const": "https://www.youtube.com/watch?v=1DYH5ud3zHo" },
+                    "youtubeVideoId": { "const": "1DYH5ud3zHo" },
+                    "youtubeTitle": { "const": "Gentle Chair Yoga for Beginners and Seniors" },
+                    "youtubeAuthor": { "const": "Yoga with Kassandra" },
+                    "youtubeAuthorUrl": { "const": "https://www.youtube.com/@yogawithkassandra" },
+                    "youtubeThumbnailUrl": { "const": "https://i.ytimg.com/vi/1DYH5ud3zHo/hqdefault.jpg" },
+                    "youtubeVerified": { "const": true },
+                    "youtubeSource": { "const": "YouTube oEmbed" },
+                    "youtubeVerifiedAt": { "const": "2026-08-09" }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": { "youtubeVerified": { "const": false } },
+              "required": ["youtubeVerified"]
+            },
+            "then": {
+              "properties": {
+                "youtubeUrl": { "type": "null" },
+                "youtubeVideoId": { "type": "null" },
+                "youtubeTitle": { "type": "null" },
+                "youtubeAuthor": { "type": "null" },
+                "youtubeAuthorUrl": { "type": "null" },
+                "youtubeThumbnailUrl": { "type": "null" },
+                "youtubeSource": { "type": "null" },
+                "youtubeVerifiedAt": { "type": "null" }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

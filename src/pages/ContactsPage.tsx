@@ -63,7 +63,7 @@ export function ContactsPage({ onBack, onOpenChat }: ContactsPageProps) {
     } catch {
       setFriends([]);
       setIncomingCount(0);
-    } fontFinally: {
+    } finally {
       setLoadingFriends(false);
     }
   }, [isAuthenticated]);
@@ -302,6 +302,7 @@ export function ContactsPage({ onBack, onOpenChat }: ContactsPageProps) {
         isOpen={isCallModalOpen}
         onClose={() => setIsCallModalOpen(false)}
         title="Tùy chọn Liên lạc"
+        scopeId="contact-action-modal"
       >
         <div className="flex flex-col items-center text-center gap-5 py-4">
           <div className="w-16 h-16 rounded-full bg-[#6AC9F0]/20 border-2 border-[#6AC9F0] flex items-center justify-center">

@@ -1,0 +1,11 @@
+{
+  "reports": [
+    {
+      "id": "a69e421e-cfad-49fb-9da7-560f50f28d2e",
+      "image_reference": "uploads/synthetic-report.jpg",
+      "status": "PROCESSED",
+      "source_type": "UPLOAD",
+      "created_at": "2026-08-09 10:30:00"
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "name": "y-te-cho-nguoi-binh-thuong-contracts",
+  "version": "1.0.0",
+  "description": "JSON Schemas and Examples manifest for contract synchronization",
+  "contracts": [
+    {
+      "id": "ocr_result",
+      "schema": "json/ocr_result.schema.json",
+      "example": "examples/ocr_result.example.json"
+    },
+    {
+      "id": "ocr_confirm",
+      "schema": "json/ocr_confirm.schema.json",
+      "example": "examples/ocr_confirm.example.json"
+    },
+    {
+      "id": "lab_analysis",
+      "schema": "json/lab_analysis.schema.json",
+      "example": "examples/lab_analysis.example.json"
+    },
+    {
+      "id": "meal_plan",
+      "schema": "json/meal_plan.schema.json",
+      "example": "examples/meal_plan.example.json"
+    },
+    {
+      "id": "gemini_meal_draft",
+      "schema": "json/gemini_meal_draft.schema.json",
+      "example": "examples/gemini_meal_draft.example.json"
+    },
+    {
+      "id": "exercise_plan",
+      "schema": "json/exercise_plan.schema.json",
+      "example": "examples/exercise_plan.example.json"
+    },
+    {
+      "id": "gemini_exercise_draft",
+      "schema": "json/gemini_exercise_draft.schema.json",
+      "example": "examples/gemini_exercise_draft.example.json"
+    },
+    {
+      "id": "history_list",
+      "schema": "json/history_list.schema.json",
+      "example": "examples/history_list.example.json"
+    },
+    {
+      "id": "report_detail",
+      "schema": "json/report_detail.schema.json",
+      "example": "examples/report_detail.example.json"
+    },
+    {
+      "id": "oauth_session",
+      "schema": "json/oauth_session.schema.json",
+      "example": "examples/oauth_session.example.json"
+    },
+    {
+      "id": "auth_session",
+      "schema": "json/auth_session.schema.json",
+      "example": "examples/auth_session.example.json"
+    },
+    {
+      "id": "phone_otp_challenge",
+      "schema": "json/phone_otp_challenge.schema.json",
+      "example": "examples/phone_otp_challenge.example.json"
+    },
+    {
+      "id": "phone_account_status",
+      "schema": "json/phone_account_status.schema.json",
+      "example": "examples/phone_account_status.example.json"
+    },
+    {
+      "id": "auth_me",
+      "schema": "json/auth_me.schema.json",
+      "example": "examples/auth_me.example.json"
+    },
+    {
+      "id": "auth_providers",
+      "schema": "json/auth_providers.schema.json",
+      "example": "examples/auth_providers.example.json"
+    },
+    {
+      "id": "esms_send_response",
+      "schema": "json/esms_send_response.schema.json",
+      "example": "examples/esms_send_response.example.json"
+    },
+    {
+      "id": "oauth_authorization",
+      "schema": "json/oauth_authorization.schema.json",
+      "example": "examples/oauth_authorization.example.json"
+    },
+    {
+      "id": "chatbot_message",
+      "schema": "json/chatbot_message.schema.json",
+      "example": "examples/chatbot_message.example.json"
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LabAnalysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reportId", "overallSummary", "results"],
+  "properties": {
+    "reportId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "overallSummary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "testCode",
+          "testName",
+          "value",
+          "unit",
+          "referenceLow",
+          "referenceHigh",
+          "referenceText",
+          "status",
+          "explanation"
+        ],
+        "properties": {
+          "testCode": {
+            "type": "string",
+            "minLength": 1
+          },
+          "testName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1
+          },
+          "referenceLow": {
+            "type": ["number", "null"]
+          },
+          "referenceHigh": {
+            "type": ["number", "null"]
+          },
+          "referenceText": {
+            "type": ["string", "null"],
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": ["LOW", "NORMAL", "HIGH", "UNKNOWN"]
+          },
+          "explanation": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

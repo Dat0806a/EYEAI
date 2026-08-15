@@ -39,6 +39,7 @@ export interface EyeFocusNode {
   id: string;
   element: HTMLElement;
   groupId?: string;
+  scopeId?: string | null;
   row?: number;
   col?: number;
   onSelect?: () => void;

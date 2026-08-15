@@ -1,6 +1,8 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect, useId } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
+import { useEyeNavigationContext } from '../../modules/eye-control/EyeNavigationProvider';
+import { EyeFocusScopeContext } from '../../modules/eye-control/EyeFocusScopeContext';
 
 interface ModalProps {
   isOpen: boolean;
@@ -8,6 +10,9 @@ interface ModalProps {
   title?: string;
   children: ReactNode;
   className?: string;
+  scopeId?: string;
+  trapEyeFocus?: boolean;
+  restoreEyeFocusOnClose?: boolean;
 }
 
 export function Modal({
@@ -16,11 +21,36 @@ export function Modal({
   title,
   children,
   className = '',
+  scopeId: customScopeId,
+  trapEyeFocus = true,
 }: ModalProps) {
+  const autoId = useId();
+  const modalScopeId =
+    customScopeId ||
+    (title
+      ? `modal-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+      : `modal-${autoId.replace(/[^a-z0-9]+/g, '-')}`);
+
+  const { pushFocusScope, popFocusScope } = useEyeNavigationContext();
+
+  useEffect(() => {
+    if (isOpen && trapEyeFocus) {
+      pushFocusScope(modalScopeId);
+      return () => {
+        popFocusScope(modalScopeId);
+      };
+    }
+  }, [isOpen, trapEyeFocus, modalScopeId, pushFocusScope, popFocusScope]);
+
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={title || 'Hộp thoại'}
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+        >
           {/* Backdrop Blur */}
           <motion.div
             initial={{ opacity: 0 }}
@@ -45,14 +75,16 @@ export function Modal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="p-2 rounded-full bg-slate-100 text-[#14213D] hover:bg-slate-200"
+                  className="p-2 rounded-full bg-slate-100 text-[#14213D] hover:bg-slate-200 cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             )}
 
-            {children}
+            <EyeFocusScopeContext.Provider value={modalScopeId}>
+              {children}
+            </EyeFocusScopeContext.Provider>
           </motion.div>
         </div>
       )}

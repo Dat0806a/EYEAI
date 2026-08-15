@@ -144,6 +144,7 @@ async function startServer() {
   // Backend Endpoints for AI Chat
   app.post("/api/ai/chat", handleAiChat);
   app.post("/api/gemini/chat", handleAiChat);
+  app.post("/api/patient/chat", handleAiChat);
 
   // Backend Endpoints for Entertainment YouTube Search (FREE QUOTA ONLY)
   app.get("/api/entertainment/search", handleEntertainmentSearch);

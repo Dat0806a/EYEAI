@@ -1,0 +1,3580 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Y tế cho người bình thường API",
+    "description": "API Backend cho ứng dụng hỗ trợ giải thích chỉ số xét nghiệm và gợi ý thực đơn, bài tập hỗ trợ.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000/api",
+      "description": "Local development server"
+    }
+  ],
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "summary": "Đăng ký tài khoản mới",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 6
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Đăng ký thành công",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AuthSession"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "Đăng nhập tài khoản",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Đăng nhập thành công",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AuthSession"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/phone/request": {
+      "post": {
+        "operationId": "requestPhoneLoginOtp",
+        "summary": "Request a generic phone login OTP challenge",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "phone"
+                ],
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OTP delivery accepted without revealing account existence",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Set-Cookie": {
+                "description": "HttpOnly yte_phone_binding browser correlation cookie.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PhoneOtpChallenge"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid phone input",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OTP request cooldown or persistent rate limit reached",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Challenge could not be created safely",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "SMS delivery unavailable",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Phone authentication is not configured",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/phone/verify": {
+      "post": {
+        "operationId": "verifyPhoneLoginOtp",
+        "summary": "Verify a browser-bound phone login OTP and create the existing JWT session",
+        "security": [],
+        "parameters": [
+          {
+            "name": "yte_phone_binding",
+            "in": "cookie",
+            "required": true,
+            "description": "HttpOnly browser correlation cookie issued with the phone challenge.",
+            "schema": {
+              "type": "string",
+              "minLength": 43,
+              "maxLength": 43,
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "challengeToken",
+                  "code"
+                ],
+                "properties": {
+                  "challengeToken": {
+                    "type": "string",
+                    "minLength": 43,
+                    "maxLength": 43,
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "minLength": 6,
+                    "maxLength": 6,
+                    "pattern": "^[0-9]{6}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Phone login verified and application session created",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AuthSession"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Challenge is invalid, expired, replayed, or bound to another browser",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OTP attempt ceiling or persistent verify rate limit reached",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Account resolution or application session creation failed",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Phone authentication is not configured",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/phone/link/request": {
+      "post": {
+        "operationId": "requestPhoneLinkOtp",
+        "summary": "Request an OTP bound to the authenticated account for phone linking",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "phone"
+                ],
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OTP delivery accepted for the authenticated account",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Set-Cookie": {
+                "description": "HttpOnly yte_phone_binding browser correlation cookie.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PhoneOtpChallenge"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid phone input",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A valid application Bearer session is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OTP request cooldown or persistent rate limit reached",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Challenge could not be created safely",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "SMS delivery unavailable",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Phone authentication is not configured",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/phone/link/verify": {
+      "post": {
+        "operationId": "verifyPhoneLinkOtp",
+        "summary": "Verify a phone OTP and link the identity to the authenticated account",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "yte_phone_binding",
+            "in": "cookie",
+            "required": true,
+            "description": "HttpOnly browser correlation cookie issued with the phone challenge.",
+            "schema": {
+              "type": "string",
+              "minLength": 43,
+              "maxLength": 43,
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "challengeToken",
+                  "code"
+                ],
+                "properties": {
+                  "challengeToken": {
+                    "type": "string",
+                    "minLength": 43,
+                    "maxLength": 43,
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "minLength": 6,
+                    "maxLength": 6,
+                    "pattern": "^[0-9]{6}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified phone identity linked to the authenticated account",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PhoneAccountStatus"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Challenge is invalid, expired, replayed, or bound to another context",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or OTP is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Phone identity belongs to another account or target account already has another phone",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OTP attempt ceiling or persistent verify rate limit reached",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Phone identity could not be linked safely",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Phone authentication is not configured",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/phone": {
+      "get": {
+        "operationId": "getPhoneAccountStatus",
+        "summary": "Get the authenticated account phone verification status",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Phone account status",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PhoneAccountStatus"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A valid application Bearer session is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Phone status could not be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "getAuthenticatedUser",
+        "summary": "Get the authenticated user, profile, and phone verification status",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated user context",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AuthMe"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A valid application Bearer session is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Authenticated user context could not be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/providers": {
+      "get": {
+        "operationId": "getAuthProviders",
+        "summary": "Get configured authentication provider availability",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Authentication provider availability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "providers"
+                      ],
+                      "properties": {
+                        "providers": {
+                          "$ref": "#/components/schemas/AuthProviders"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Provider status could not be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oauth/exchange": {
+      "post": {
+        "operationId": "exchangeOAuthCallbackCode",
+        "summary": "Exchange a single-use OAuth callback code for an application session",
+        "security": [],
+        "parameters": [
+          {
+            "name": "yte_oauth_binding",
+            "in": "cookie",
+            "required": true,
+            "description": "HttpOnly browser correlation cookie issued when OAuth starts.",
+            "schema": {
+              "type": "string",
+              "minLength": 43,
+              "maxLength": 43,
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code",
+                  "intent"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 43,
+                    "maxLength": 43,
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  },
+                  "intent": {
+                    "type": "string",
+                    "enum": [
+                      "LOGIN",
+                      "REGISTER",
+                      "LINK"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OAuth session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/OAuthSession"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The callback code or authorization state is invalid or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The OAuth identity requires explicit linking or conflicts with another account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The application session could not be created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The OAuth provider failed to complete authentication",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/google/link": {
+      "post": {
+        "operationId": "startGoogleOAuthLink",
+        "summary": "Start linking Google to the authenticated account",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Google authorization URL created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/OAuthAuthorization"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "const": "GOOGLE"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A valid application Bearer session is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OAuth account-linking attempts or pending authorization state capacity are limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Google account linking could not be started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Google OAuth is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/facebook/link": {
+      "post": {
+        "operationId": "startFacebookOAuthLink",
+        "summary": "Start linking Facebook to the authenticated account",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Facebook authorization URL created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/OAuthAuthorization"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "const": "FACEBOOK"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A valid application Bearer session is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OAuth account-linking attempts or pending authorization state capacity are limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Facebook account linking could not be started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Facebook OAuth is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/google/callback": {
+      "get": {
+        "operationId": "completeGoogleOAuthCallback",
+        "summary": "Complete Google OAuth and redirect with an opaque callback code",
+        "security": [],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the frontend with only a single-use callback code",
+            "headers": {
+              "Location": {
+                "required": true,
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthCallbackLocation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many OAuth callback attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The fallback callback code could not be issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/facebook/callback": {
+      "get": {
+        "operationId": "completeFacebookOAuthCallback",
+        "summary": "Complete Facebook OAuth and redirect with an opaque callback code",
+        "security": [],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the frontend with only a single-use callback code",
+            "headers": {
+              "Location": {
+                "required": true,
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthCallbackLocation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many OAuth callback attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The fallback callback code could not be issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/profile": {
+      "put": {
+        "operationId": "updateAuthenticatedProfile",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Cập nhật hồ sơ người dùng",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fullName",
+                  "dateOfBirth",
+                  "gender"
+                ],
+                "properties": {
+                  "fullName": {
+                    "type": "string"
+                  },
+                  "dateOfBirth": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "gender": {
+                    "type": "string",
+                    "enum": [
+                      "MALE",
+                      "FEMALE",
+                      "OTHER"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cập nhật thành công",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ocr/scan": {
+      "post": {
+        "summary": "Tải ảnh lên để quét OCR và nhận diện chỉ số thô",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reportImage"
+                ],
+                "properties": {
+                  "reportImage": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Kết quả OCR thô đã chuẩn hóa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "reportId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "results": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "testCode": {
+                                "type": "string"
+                              },
+                              "testName": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "number"
+                              },
+                              "unit": {
+                                "type": "string"
+                              },
+                              "referenceRange": {
+                                "type": "object",
+                                "properties": {
+                                  "low": {
+                                    "type": "number"
+                                  },
+                                  "high": {
+                                    "type": "number"
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "ocrConfidence": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analysis/confirm": {
+      "post": {
+        "summary": "Xác nhận kết quả Review OCR để tiến hành phân tích sâu và sinh thực đơn + bài tập",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reportId",
+                  "results"
+                ],
+                "properties": {
+                  "reportId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "results": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "testCode": {
+                          "type": "string"
+                        },
+                        "testName": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "number"
+                        },
+                        "unit": {
+                          "type": "string"
+                        },
+                        "referenceRange": {
+                          "type": "object",
+                          "properties": {
+                            "low": {
+                              "type": "number"
+                            },
+                            "high": {
+                              "type": "number"
+                            },
+                            "text": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Kết quả Phân tích y tế & Thực đơn & Bài tập đã sinh thành công",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "analysis": {
+                          "$ref": "#/components/schemas/LabAnalysis"
+                        },
+                        "mealPlan": {
+                          "$ref": "#/components/schemas/MealPlan"
+                        },
+                        "exercisePlan": {
+                          "$ref": "#/components/schemas/ExercisePlan"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analysis/history": {
+      "get": {
+        "summary": "Lấy danh sách lịch sử xét nghiệm",
+        "responses": {
+          "200": {
+            "description": "Danh sách phiếu xét nghiệm của người dùng",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/HistoryList"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analysis/history/{reportId}": {
+      "get": {
+        "summary": "Lấy chi tiết một lần phân tích",
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chi tiết kết quả, thực đơn và bài tập đã lưu",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "report"
+                      ],
+                      "properties": {
+                        "report": {
+                          "$ref": "#/components/schemas/ReportDetail"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/message": {
+      "post": {
+        "summary": "Gửi câu hỏi chatbot",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "reportId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Phản hồi từ Chatbot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reply": {
+                          "type": "string"
+                        },
+                        "audioUrl": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/phone/register/request": {
+      "post": {
+        "operationId": "requestPhoneRegisterOtp",
+        "summary": "Request a generic phone registration OTP challenge",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "phone"
+                ],
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OTP delivery accepted without revealing account existence",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Set-Cookie": {
+                "description": "HttpOnly yte_phone_binding browser correlation cookie.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PhoneOtpChallenge"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid phone input",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OTP request cooldown or persistent rate limit reached",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Challenge could not be created safely",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "SMS delivery unavailable",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Phone authentication is not configured",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/phone/register/verify": {
+      "post": {
+        "operationId": "verifyPhoneRegisterOtp",
+        "summary": "Verify a browser-bound phone registration OTP and create one new account",
+        "security": [],
+        "parameters": [
+          {
+            "name": "yte_phone_binding",
+            "in": "cookie",
+            "required": true,
+            "description": "HttpOnly browser correlation cookie issued with the phone challenge.",
+            "schema": {
+              "type": "string",
+              "minLength": 43,
+              "maxLength": 43,
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "challengeToken",
+                  "code"
+                ],
+                "properties": {
+                  "challengeToken": {
+                    "type": "string",
+                    "minLength": 43,
+                    "maxLength": 43,
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "minLength": 6,
+                    "maxLength": 6,
+                    "pattern": "^[0-9]{6}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Phone registration verified and application session created",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "data",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AuthSession"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Challenge is invalid, expired, replayed, or bound to another browser",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The verified phone already belongs to a registered account",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OTP attempt ceiling or persistent verify rate limit reached",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Account resolution or application session creation failed",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Phone authentication is not configured",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/google": {
+      "get": {
+        "operationId": "startGoogleOAuth",
+        "summary": "Start Google OAuth for an explicit login or registration intent",
+        "security": [],
+        "parameters": [
+          {
+            "name": "intent",
+            "in": "query",
+            "required": true,
+            "description": "Public OAuth purpose. LOGIN never creates an account; REGISTER never logs into an existing identity.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "LOGIN",
+                "REGISTER"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the provider authorization endpoint"
+          },
+          "400": {
+            "description": "Missing or invalid auth intent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OAuth start rate or pending-state capacity exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Google OAuth is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/facebook": {
+      "get": {
+        "operationId": "startFacebookOAuth",
+        "summary": "Start Facebook OAuth for an explicit login or registration intent",
+        "security": [],
+        "parameters": [
+          {
+            "name": "intent",
+            "in": "query",
+            "required": true,
+            "description": "Public OAuth purpose. LOGIN never creates an account; REGISTER never logs into an existing identity.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "LOGIN",
+                "REGISTER"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the provider authorization endpoint"
+          },
+          "400": {
+            "description": "Missing or invalid auth intent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OAuth start rate or pending-state capacity exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Facebook OAuth is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "OAuthSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "token",
+          "intent"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "pattern": "^\\S+$"
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "LOGIN",
+              "REGISTER",
+              "LINK"
+            ]
+          }
+        }
+      },
+      "AuthSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "token"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "pattern": "^\\S+$"
+          }
+        }
+      },
+      "PhoneOtpChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "challengeToken",
+          "expiresAt",
+          "resendAvailableAt"
+        ],
+        "properties": {
+          "challengeToken": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43,
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resendAvailableAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PhoneAccountStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "phoneVerified",
+          "maskedPhone"
+        ],
+        "properties": {
+          "phoneVerified": {
+            "type": "boolean"
+          },
+          "maskedPhone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\+[1-9][0-9]{0,2}\\*{4,12}[0-9]{2,4}$"
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "phoneVerified": {
+                "const": false
+              },
+              "maskedPhone": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "properties": {
+              "phoneVerified": {
+                "const": true
+              },
+              "maskedPhone": {
+                "type": "string",
+                "pattern": "^\\+[1-9][0-9]{0,2}\\*{4,12}[0-9]{2,4}$"
+              }
+            }
+          }
+        ]
+      },
+      "AuthProviders": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "google",
+          "facebook",
+          "phoneOtp"
+        ],
+        "properties": {
+          "google": {
+            "type": "boolean"
+          },
+          "facebook": {
+            "type": "boolean"
+          },
+          "phoneOtp": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AuthMe": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "hasProfile",
+          "profile",
+          "phone"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "hasProfile": {
+            "type": "boolean"
+          },
+          "profile": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "user_id",
+                  "full_name",
+                  "date_of_birth",
+                  "gender"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "full_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "date_of_birth": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "gender": {
+                    "type": "string",
+                    "enum": [
+                      "MALE",
+                      "FEMALE",
+                      "OTHER"
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "phone": {
+            "$ref": "#/components/schemas/PhoneAccountStatus"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "hasProfile": {
+                  "const": false
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "profile": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "hasProfile": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "profile": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "OAuthAuthorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "authorizationUrl"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "GOOGLE",
+              "FACEBOOK"
+            ]
+          },
+          "authorizationUrl": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "provider",
+              "authorizationUrl"
+            ],
+            "properties": {
+              "provider": {
+                "const": "GOOGLE"
+              },
+              "authorizationUrl": {
+                "pattern": "^https://accounts\\.google\\.com/o/oauth2/v2/auth(?:\\?[^#]*)?$"
+              }
+            }
+          },
+          {
+            "required": [
+              "provider",
+              "authorizationUrl"
+            ],
+            "properties": {
+              "provider": {
+                "const": "FACEBOOK"
+              },
+              "authorizationUrl": {
+                "pattern": "^https://www\\.facebook\\.com/v[0-9]+(?:\\.[0-9]+)?/dialog/oauth(?:\\?[^#]*)?$"
+              }
+            }
+          }
+        ]
+      },
+      "OAuthCallbackLocation": {
+        "type": "string",
+        "format": "uri",
+        "pattern": "^https?://[^/?#@\\s]+/oauth/callback\\?code=[A-Za-z0-9_-]{43}&intent=(?:LOGIN|REGISTER|LINK)$"
+      },
+      "ApiErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "data",
+          "error"
+        ],
+        "properties": {
+          "success": {
+            "const": false
+          },
+          "data": {
+            "type": "null"
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Z][A-Z0-9_]*$"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000,
+                "pattern": "\\S"
+              },
+              "details": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/components/schemas/ValidationIssue"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ValidationIssue": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "code",
+          "message",
+          "path"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "LabAnalysis": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reportId",
+          "overallSummary",
+          "results"
+        ],
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "overallSummary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "testCode",
+                "testName",
+                "value",
+                "unit",
+                "referenceLow",
+                "referenceHigh",
+                "referenceText",
+                "status",
+                "explanation"
+              ],
+              "properties": {
+                "testCode": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "testName": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "referenceLow": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "referenceHigh": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "referenceText": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "LOW",
+                    "NORMAL",
+                    "HIGH",
+                    "UNKNOWN"
+                  ]
+                },
+                "explanation": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      },
+      "HistoryReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "image_reference",
+          "status",
+          "source_type",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "image_reference": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "PROCESSED",
+              "FAILED"
+            ]
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "CAMERA",
+              "UPLOAD"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "HistoryList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reports"
+        ],
+        "properties": {
+          "reports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HistoryReport"
+            }
+          }
+        }
+      },
+      "PersistedLabResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "test_code",
+          "test_name",
+          "value",
+          "unit",
+          "reference_low",
+          "reference_high",
+          "reference_text",
+          "status",
+          "ocr_confidence",
+          "explanation"
+        ],
+        "properties": {
+          "test_code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "test_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reference_low": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reference_high": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reference_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "LOW",
+              "NORMAL",
+              "HIGH",
+              "UNKNOWN"
+            ]
+          },
+          "ocr_confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "explanation": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        }
+      },
+      "ReportDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "overallSummary",
+          "results",
+          "mealPlan",
+          "exercisePlan"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "overallSummary": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersistedLabResult"
+            }
+          },
+          "mealPlan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MealPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exercisePlan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ExercisePlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MealPlanItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mealType",
+          "name",
+          "description",
+          "ingredients",
+          "preparation",
+          "rationale",
+          "imageUrl",
+          "imageAlt",
+          "imageSourceUrl",
+          "imageLicense",
+          "imageAuthor",
+          "imageVerifiedAt"
+        ],
+        "properties": {
+          "mealType": {
+            "type": "string",
+            "enum": [
+              "BREAKFAST",
+              "LUNCH",
+              "DINNER",
+              "SNACK",
+              "DRINK"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ingredients": {
+            "type": "string",
+            "minLength": 1
+          },
+          "preparation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "imageAlt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageSourceUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "imageLicense": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageAuthor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageVerifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "imageUrl": {
+                "const": "https://upload.wikimedia.org/wikipedia/commons/6/65/Beef_noodle_soup_%28Ph%E1%BB%9F_b%C3%B2%29_-_Pho_Hanoi_Authentic_2024-12-01.jpg"
+              },
+              "imageAlt": {
+                "const": "Bát phở bò Hà Nội với thịt bò và rau xanh"
+              },
+              "imageSourceUrl": {
+                "const": "https://commons.wikimedia.org/wiki/File:Beef_noodle_soup_(Ph%E1%BB%9F_b%C3%B2)_-_Pho_Hanoi_Authentic_2024-12-01.jpg"
+              },
+              "imageLicense": {
+                "const": "CC0"
+              },
+              "imageAuthor": {
+                "const": "Andy Li"
+              },
+              "imageVerifiedAt": {
+                "const": "2026-08-09"
+              }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": {
+                "const": "https://upload.wikimedia.org/wikipedia/commons/4/49/Healthy_egg_and_toasted_bread_breakfast.jpg"
+              },
+              "imageAlt": {
+                "const": "Bữa sáng với trứng, bánh mì nướng và rau tươi"
+              },
+              "imageSourceUrl": {
+                "const": "https://commons.wikimedia.org/wiki/File:Healthy_egg_and_toasted_bread_breakfast.jpg"
+              },
+              "imageLicense": {
+                "const": "CC BY-SA 4.0"
+              },
+              "imageAuthor": {
+                "const": "Deborah Tjituka"
+              },
+              "imageVerifiedAt": {
+                "const": "2026-08-09"
+              }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": {
+                "const": "https://upload.wikimedia.org/wikipedia/commons/0/06/Riz_blanc_au_poisson.jpg"
+              },
+              "imageAlt": {
+                "const": "Đĩa cơm trắng ăn cùng cá và rau xanh"
+              },
+              "imageSourceUrl": {
+                "const": "https://commons.wikimedia.org/wiki/File:Riz_blanc_au_poisson.jpg"
+              },
+              "imageLicense": {
+                "const": "CC BY-SA 4.0"
+              },
+              "imageAuthor": {
+                "const": "Cheikh cherif"
+              },
+              "imageVerifiedAt": {
+                "const": "2026-08-09"
+              }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": {
+                "const": "https://upload.wikimedia.org/wikipedia/commons/7/7c/-2022-02-01_Bowl_of_spring_vegetable_soup%2C_Trimingham%2C_Norfolk.JPG"
+              },
+              "imageAlt": {
+                "const": "Bát canh rau củ mùa xuân dùng cho bữa tối"
+              },
+              "imageSourceUrl": {
+                "const": "https://commons.wikimedia.org/wiki/File:-2022-02-01_Bowl_of_spring_vegetable_soup,_Trimingham,_Norfolk.JPG"
+              },
+              "imageLicense": {
+                "const": "CC BY-SA 4.0"
+              },
+              "imageAuthor": {
+                "const": "Kolforn"
+              },
+              "imageVerifiedAt": {
+                "const": "2026-08-09"
+              }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": {
+                "const": "https://upload.wikimedia.org/wikipedia/commons/4/4c/Nuts_and_Fruit_%28Unsplash%29.jpg"
+              },
+              "imageAlt": {
+                "const": "Trái cây tươi và các loại hạt dùng cho bữa phụ"
+              },
+              "imageSourceUrl": {
+                "const": "https://commons.wikimedia.org/wiki/File:Nuts_and_Fruit_(Unsplash).jpg"
+              },
+              "imageLicense": {
+                "const": "CC0"
+              },
+              "imageAuthor": {
+                "const": "Roberta Sorge"
+              },
+              "imageVerifiedAt": {
+                "const": "2026-08-09"
+              }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": {
+                "const": "https://upload.wikimedia.org/wikipedia/commons/a/a8/Cup_of_Green_Tea_and_Snacks.jpg"
+              },
+              "imageAlt": {
+                "const": "Tách trà xanh ít đường dùng cùng đồ ăn nhẹ"
+              },
+              "imageSourceUrl": {
+                "const": "https://commons.wikimedia.org/wiki/File:Cup_of_Green_Tea_and_Snacks.jpg"
+              },
+              "imageLicense": {
+                "const": "CC BY-SA 4.0"
+              },
+              "imageAuthor": {
+                "const": "Major Lyte"
+              },
+              "imageVerifiedAt": {
+                "const": "2026-08-09"
+              }
+            }
+          },
+          {
+            "properties": {
+              "imageUrl": {
+                "type": "null"
+              },
+              "imageAlt": {
+                "type": "null"
+              },
+              "imageSourceUrl": {
+                "type": "null"
+              },
+              "imageLicense": {
+                "type": "null"
+              },
+              "imageAuthor": {
+                "type": "null"
+              },
+              "imageVerifiedAt": {
+                "type": "null"
+              }
+            }
+          }
+        ]
+      },
+      "MealPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reportId",
+          "title",
+          "description",
+          "items"
+        ],
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "items": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 5,
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "mealType": {
+                      "const": "BREAKFAST"
+                    }
+                  },
+                  "required": [
+                    "mealType"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "mealType": {
+                      "const": "LUNCH"
+                    }
+                  },
+                  "required": [
+                    "mealType"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "mealType": {
+                      "const": "DINNER"
+                    }
+                  },
+                  "required": [
+                    "mealType"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "mealType": {
+                      "const": "SNACK"
+                    }
+                  },
+                  "required": [
+                    "mealType"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "mealType": {
+                      "const": "DRINK"
+                    }
+                  },
+                  "required": [
+                    "mealType"
+                  ]
+                }
+              }
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MealPlanItem"
+            }
+          }
+        }
+      },
+      "ExercisePlanItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "description",
+          "duration",
+          "difficulty",
+          "rationale",
+          "youtubeUrl",
+          "youtubeVideoId",
+          "youtubeTitle",
+          "youtubeAuthor",
+          "youtubeAuthorUrl",
+          "youtubeThumbnailUrl",
+          "youtubeVerified",
+          "youtubeSource",
+          "youtubeVerifiedAt"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "EASY",
+              "MEDIUM",
+              "HARD"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "youtubeUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "youtubeVideoId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "youtubeTitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "youtubeAuthor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "youtubeAuthorUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "youtubeThumbnailUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "youtubeVerified": {
+            "type": "boolean"
+          },
+          "youtubeSource": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "youtubeVerifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "youtubeUrl": {
+                "const": "https://www.youtube.com/watch?v=u08lo0bESJc"
+              },
+              "youtubeVideoId": {
+                "const": "u08lo0bESJc"
+              },
+              "youtubeTitle": {
+                "const": "Heart Healthy - 1 Mile Walk | Walk at Home"
+              },
+              "youtubeAuthor": {
+                "const": "Walk at Home"
+              },
+              "youtubeAuthorUrl": {
+                "const": "https://www.youtube.com/@LeslieSansonesWalkatHome"
+              },
+              "youtubeThumbnailUrl": {
+                "const": "https://i.ytimg.com/vi/u08lo0bESJc/hqdefault.jpg"
+              },
+              "youtubeVerified": {
+                "const": true
+              },
+              "youtubeSource": {
+                "const": "YouTube oEmbed"
+              },
+              "youtubeVerifiedAt": {
+                "const": "2026-08-09"
+              }
+            }
+          },
+          {
+            "properties": {
+              "youtubeUrl": {
+                "const": "https://www.youtube.com/watch?v=v7AYKMP6rOE"
+              },
+              "youtubeVideoId": {
+                "const": "v7AYKMP6rOE"
+              },
+              "youtubeTitle": {
+                "const": "Yoga For Complete Beginners - 20 Minute Home Yoga Workout!"
+              },
+              "youtubeAuthor": {
+                "const": "Yoga With Adriene"
+              },
+              "youtubeAuthorUrl": {
+                "const": "https://www.youtube.com/@yogawithadriene"
+              },
+              "youtubeThumbnailUrl": {
+                "const": "https://i.ytimg.com/vi/v7AYKMP6rOE/hqdefault.jpg"
+              },
+              "youtubeVerified": {
+                "const": true
+              },
+              "youtubeSource": {
+                "const": "YouTube oEmbed"
+              },
+              "youtubeVerifiedAt": {
+                "const": "2026-08-09"
+              }
+            }
+          },
+          {
+            "properties": {
+              "youtubeUrl": {
+                "const": "https://www.youtube.com/watch?v=1DYH5ud3zHo"
+              },
+              "youtubeVideoId": {
+                "const": "1DYH5ud3zHo"
+              },
+              "youtubeTitle": {
+                "const": "Gentle Chair Yoga for Beginners and Seniors"
+              },
+              "youtubeAuthor": {
+                "const": "Yoga with Kassandra"
+              },
+              "youtubeAuthorUrl": {
+                "const": "https://www.youtube.com/@yogawithkassandra"
+              },
+              "youtubeThumbnailUrl": {
+                "const": "https://i.ytimg.com/vi/1DYH5ud3zHo/hqdefault.jpg"
+              },
+              "youtubeVerified": {
+                "const": true
+              },
+              "youtubeSource": {
+                "const": "YouTube oEmbed"
+              },
+              "youtubeVerifiedAt": {
+                "const": "2026-08-09"
+              }
+            }
+          },
+          {
+            "properties": {
+              "youtubeUrl": {
+                "type": "null"
+              },
+              "youtubeVideoId": {
+                "type": "null"
+              },
+              "youtubeTitle": {
+                "type": "null"
+              },
+              "youtubeAuthor": {
+                "type": "null"
+              },
+              "youtubeAuthorUrl": {
+                "type": "null"
+              },
+              "youtubeThumbnailUrl": {
+                "type": "null"
+              },
+              "youtubeVerified": {
+                "const": false
+              },
+              "youtubeSource": {
+                "type": "null"
+              },
+              "youtubeVerifiedAt": {
+                "type": "null"
+              }
+            }
+          }
+        ]
+      },
+      "ExercisePlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reportId",
+          "title",
+          "items"
+        ],
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/ExercisePlanItem"
+            }
+          }
+        }
+      }
+    }
+  }
+}

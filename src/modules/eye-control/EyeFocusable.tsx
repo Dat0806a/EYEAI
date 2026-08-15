@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, ReactNode, useState, memo, useCallback } from 'react';
 import { useEyeNavigationContext } from './EyeNavigationProvider';
 import { useEyeTrackingSettings } from './useEyeTracking';
+import { useEyeFocusScope } from './EyeFocusScopeContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { speakVietnamese } from '../../utils/speech';
 
@@ -9,6 +10,7 @@ interface EyeFocusableProps {
   key?: React.Key;
   onSelect?: () => void;
   groupId?: string;
+  scopeId?: string | null;
   row?: number;
   col?: number;
   className?: string;
@@ -21,6 +23,7 @@ export const EyeFocusable = memo(function EyeFocusable({
   id,
   onSelect,
   groupId,
+  scopeId,
   row,
   col,
   className = '',
@@ -32,6 +35,8 @@ export const EyeFocusable = memo(function EyeFocusable({
   const elementRef = useRef<HTMLDivElement>(null);
   const { activeFocusId, registerFocusNode, unregisterFocusNode, setFocusId } = useEyeNavigationContext();
   const { settings } = useEyeTrackingSettings();
+  const inheritedScopeId = useEyeFocusScope();
+  const effectiveScopeId = scopeId !== undefined ? scopeId : (inheritedScopeId ?? null);
 
   const [isSelecting, setIsSelecting] = useState(false);
   const isFocused = settings.eyeControlEnabled && activeFocusId === id;
@@ -77,6 +82,7 @@ export const EyeFocusable = memo(function EyeFocusable({
   }, []);
 
   const handleSelect = useCallback(() => {
+    setFocusId(id);
     setIsSelecting(true);
     setTimeout(() => setIsSelecting(false), 180);
 
@@ -86,7 +92,7 @@ export const EyeFocusable = memo(function EyeFocusable({
     }
 
     if (onSelectRef.current) onSelectRef.current();
-  }, [getVoiceText]);
+  }, [id, setFocusId, getVoiceText]);
 
   // Automatically announce voice out loud when eye focus changes to this item
   useEffect(() => {
@@ -108,6 +114,7 @@ export const EyeFocusable = memo(function EyeFocusable({
       id,
       element: elementRef.current,
       groupId,
+      scopeId: effectiveScopeId,
       row,
       col,
       onSelect: handleSelect,
@@ -116,7 +123,7 @@ export const EyeFocusable = memo(function EyeFocusable({
     return () => {
       unregisterFocusNode(id);
     };
-  }, [id, groupId, row, col, registerFocusNode, unregisterFocusNode, handleSelect]);
+  }, [id, groupId, effectiveScopeId, row, col, registerFocusNode, unregisterFocusNode, handleSelect]);
 
   return (
     <Component
@@ -125,7 +132,7 @@ export const EyeFocusable = memo(function EyeFocusable({
       tabIndex={0}
       onClick={handleSelect}
       onFocus={() => setFocusId(id)}
-      className={`relative transition-all duration-180 cursor-pointer select-none ${
+      className={`relative transition-all duration-180 cursor-pointer select-none scroll-my-6 ${
         isFocused ? 'scale-[1.045] z-30 brightness-[1.04]' : ''
       } ${isSelecting ? 'scale-[0.965] brightness-115' : ''} ${className}`}
     >

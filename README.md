@@ -18,3 +18,11 @@ View your app in AI Studio: https://ai.studio/apps/b624580a-48f0-4f1b-b870-ba256
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+---
+
+## 📚 Technical Documentation & Workflows
+
+- [**WORKFLOW.md**](./WORKFLOW.md): Detailed end-to-end system workflows, visual sequence diagrams, and module pipelines.
+- [**PROJECT_ANALYSIS_TECHNICAL.md**](./PROJECT_ANALYSIS_TECHNICAL.md): Comprehensive technical architecture, algorithms (EAR, 2D Spatial Navigation, Telex Engine), and feature breakdown.
+
