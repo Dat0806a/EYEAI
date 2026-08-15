@@ -1,7 +1,10 @@
 /**
  * Video Cache & Chained Preloader Service for Netlify & Modern Web Browsers
- * Solves MP4 stuttering, video frame loss, and latency by pre-buffering videos as Blob URLs.
+ * Solves MP4 stuttering, video frame loss, and cache stale issues by pre-buffering videos as Blob URLs.
  */
+
+// Cache-busting version key to invalidate old browser disk cache whenever videos are updated
+export const VIDEO_CACHE_VERSION = '2026.08.15.v2';
 
 class VideoCacheManager {
   private cacheMap = new Map<
@@ -16,9 +19,21 @@ class VideoCacheManager {
   private videoElementCache = new Map<string, HTMLVideoElement>();
 
   /**
+   * Appends a cache-busting version query string to force fresh fetches on new deployments.
+   */
+  public getVersionedUrl(url: string): string {
+    if (!url) return url;
+    if (url.startsWith('blob:') || url.includes('?v=')) return url;
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}v=${VIDEO_CACHE_VERSION}`;
+  }
+
+  /**
    * Preloads a video file via fetch into an Object URL (Blob) and warms up the video decoder buffer.
    */
-  public preloadVideo(url: string): Promise<string> {
+  public preloadVideo(rawUrl: string): Promise<string> {
+    const url = this.getVersionedUrl(rawUrl);
+
     const existing = this.cacheMap.get(url);
     if (existing) {
       if (existing.status === 'loaded' && existing.blobUrl) {
@@ -38,13 +53,14 @@ class VideoCacheManager {
 
       try {
         if (import.meta.env.DEV) {
-          console.log(`[VideoCacheManager] Preloading video: ${url}`);
+          console.log(`[VideoCacheManager] Preloading versioned video: ${url}`);
         }
 
         const response = await fetch(url, {
           method: 'GET',
           headers: {
             'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8',
+            'Cache-Control': 'no-cache',
           },
         });
 
@@ -76,7 +92,7 @@ class VideoCacheManager {
 
         return blobUrl;
       } catch (err) {
-        console.warn(`[VideoCacheManager] Fetch preload failed for ${url}, falling back to original URL:`, err);
+        console.warn(`[VideoCacheManager] Fetch preload failed for ${url}, falling back to versioned URL:`, err);
         this.cacheMap.set(url, {
           blobUrl: url,
           status: 'error',
@@ -95,14 +111,31 @@ class VideoCacheManager {
   }
 
   /**
-   * Returns the preloaded Blob URL if available, otherwise returns the original URL.
+   * Returns the preloaded Blob URL if available, otherwise returns the versioned URL.
    */
-  public getCachedVideoUrl(url: string): string {
+  public getCachedVideoUrl(rawUrl: string): string {
+    const url = this.getVersionedUrl(rawUrl);
     const entry = this.cacheMap.get(url);
     if (entry && entry.status === 'loaded' && entry.blobUrl) {
       return entry.blobUrl;
     }
     return url;
+  }
+
+  /**
+   * Clear all active Object URLs and reset memory cache map.
+   */
+  public clearCache(): void {
+    this.cacheMap.forEach((entry) => {
+      if (entry.blobUrl && entry.blobUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(entry.blobUrl);
+      }
+    });
+    this.cacheMap.clear();
+    this.videoElementCache.clear();
+    if (import.meta.env.DEV) {
+      console.log('[VideoCacheManager] Cleared all blob video memory caches.');
+    }
   }
 
   /**

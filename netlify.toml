@@ -10,8 +10,9 @@
 [[headers]]
   for = "/*.mp4"
   [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
+    Cache-Control = "public, max-age=0, must-revalidate"
     Accept-Ranges = "bytes"
     Content-Type = "video/mp4"
     Access-Control-Allow-Origin = "*"
+
 
