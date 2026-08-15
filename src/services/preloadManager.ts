@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { videoCacheManager } from './videoCacheManager';
 
 export interface PreloadTask {
   id: string;
@@ -55,7 +56,21 @@ export class PreloadManager {
       },
     });
 
-    // 2. Critical: Initial Auth Session Restore
+    // 2. Critical: Preload Login/Register video while Splash is active
+    this.addTask({
+      id: 'task-video-login',
+      name: 'Nạp bộ đệm video Đăng nhập...',
+      isCritical: false,
+      run: async () => {
+        try {
+          await videoCacheManager.preloadLoginRegisterVideo();
+        } catch (err) {
+          console.warn('[SPLASH][PRELOAD] Non-critical video preload error:', err);
+        }
+      },
+    });
+
+    // 3. Critical: Initial Auth Session Restore
     this.addTask({
       id: 'task-auth-session',
       name: 'Khởi tạo phiên đăng nhập...',

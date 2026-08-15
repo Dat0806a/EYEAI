@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, memo } from 'react';
+import { videoCacheManager } from '../../services/videoCacheManager';
 
 const FADE_DURATION_MS = 800; // 800ms smooth optical crossfade
 
@@ -86,6 +87,8 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
     };
   }, []);
 
+  const videoSrc = videoCacheManager.getCachedVideoUrl('/bg.mp4');
+
   return (
     <div className="fixed inset-0 w-full h-full pointer-events-none z-0 overflow-hidden select-none">
       {/* Video Buffer A - Primary Instant Load Buffer */}
@@ -111,7 +114,7 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
         className={`absolute inset-0 w-full h-full object-cover ${
           activeVideo === 'A' ? 'opacity-100' : 'opacity-0'
         }`}
-        src="/bg.mp4"
+        src={videoSrc}
       />
 
       {/* Video Buffer B - Secondary Buffer (Loaded lazily after Buffer A is active) */}
@@ -132,7 +135,7 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
         className={`absolute inset-0 w-full h-full object-cover ${
           activeVideo === 'B' ? 'opacity-100' : 'opacity-0'
         }`}
-        src={hasBufferBLoaded ? "/bg.mp4" : undefined}
+        src={hasBufferBLoaded ? videoSrc : undefined}
       />
 
       {/* 38% Soft Warm Overlay for UI readability & enhanced video clarity */}
@@ -140,3 +143,4 @@ export const BackgroundVideo = memo(function BackgroundVideo() {
     </div>
   );
 });
+

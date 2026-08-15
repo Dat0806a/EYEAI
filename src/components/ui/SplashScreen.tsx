@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
+import { videoCacheManager } from '../../services/videoCacheManager';
 
 export interface SplashScreenProps {
   isPreloadComplete: boolean;
@@ -58,6 +59,9 @@ export function SplashScreen({
   }, []);
 
   useEffect(() => {
+    // Chained Preload Phase 1: Preload Login/Register video while Splash video is running
+    videoCacheManager.preloadLoginRegisterVideo().catch(() => {});
+
     attemptPlay();
 
     const handleUserInteraction = () => {
@@ -116,7 +120,7 @@ export function SplashScreen({
         className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
           videoError ? 'opacity-0' : 'opacity-100'
         }`}
-        src="/login.mp4"
+        src={videoCacheManager.getCachedVideoUrl('/login.mp4')}
       />
 
       {/* Fallback Ambient Gradient in case video is loading or failed */}
