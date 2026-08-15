@@ -240,10 +240,10 @@ export function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFormProps) 
           </div>
 
           {/* Form Fields container */}
-          <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-1.5 sm:gap-2.5">
             {/* Họ và tên */}
             <div>
-              <label htmlFor="reg-name" className="block text-xs font-black text-[#0A192F] mb-0.5">
+              <label htmlFor="reg-name" className="block text-[11px] sm:text-xs font-black text-[#0A192F] mb-0.5">
                 Họ và tên
               </label>
               <input
@@ -254,13 +254,13 @@ export function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFormProps) 
                 placeholder="Nhập họ và tên của bạn"
                 autoComplete="name"
                 disabled={loading}
-                className="w-full h-10 px-3.5 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-xs sm:text-sm shadow-2xs backdrop-blur-xs"
+                className="w-full h-9 sm:h-10 px-3 sm:px-3.5 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-xs sm:text-sm shadow-2xs backdrop-blur-xs"
               />
             </div>
 
             {/* Email / Số điện thoại */}
             <div>
-              <label htmlFor="reg-email" className="block text-xs font-black text-[#0A192F] mb-0.5">
+              <label htmlFor="reg-email" className="block text-[11px] sm:text-xs font-black text-[#0A192F] mb-0.5">
                 Email / Số điện thoại
               </label>
               <input
@@ -271,13 +271,13 @@ export function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFormProps) 
                 placeholder="Nhập email hoặc số điện thoại"
                 autoComplete="email"
                 disabled={loading}
-                className="w-full h-10 px-3.5 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-xs sm:text-sm shadow-2xs backdrop-blur-xs"
+                className="w-full h-9 sm:h-10 px-3 sm:px-3.5 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-xs sm:text-sm shadow-2xs backdrop-blur-xs"
               />
             </div>
 
             {/* Mật khẩu */}
             <div>
-              <label htmlFor="reg-password" className="block text-xs font-black text-[#0A192F] mb-0.5">
+              <label htmlFor="reg-password" className="block text-[11px] sm:text-xs font-black text-[#0A192F] mb-0.5">
                 Mật khẩu
               </label>
               <div className="relative">
@@ -289,7 +289,7 @@ export function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFormProps) 
                   placeholder="Tạo mật khẩu (ít nhất 6 ký tự)"
                   autoComplete="new-password"
                   disabled={loading}
-                  className="w-full h-10 pl-3.5 pr-10 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-xs sm:text-sm shadow-2xs backdrop-blur-xs"
+                  className="w-full h-9 sm:h-10 pl-3 sm:pl-3.5 pr-10 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-xs sm:text-sm shadow-2xs backdrop-blur-xs"
                 />
                 <button
                   type="button"
@@ -304,7 +304,7 @@ export function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFormProps) 
 
             {/* Xác nhận mật khẩu */}
             <div>
-              <label htmlFor="reg-confirm" className="block text-xs font-black text-[#0A192F] mb-0.5">
+              <label htmlFor="reg-confirm" className="block text-[11px] sm:text-xs font-black text-[#0A192F] mb-0.5">
                 Xác nhận mật khẩu
               </label>
               <div className="relative">
@@ -316,7 +316,7 @@ export function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFormProps) 
                   placeholder="Nhập lại mật khẩu"
                   autoComplete="new-password"
                   disabled={loading}
-                  className="w-full h-10 pl-3.5 pr-10 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-xs sm:text-sm shadow-2xs backdrop-blur-xs"
+                  className="w-full h-9 sm:h-10 pl-3 sm:pl-3.5 pr-10 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-xs sm:text-sm shadow-2xs backdrop-blur-xs"
                 />
                 <button
                   type="button"
@@ -335,7 +335,7 @@ export function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFormProps) 
                 id="btn-register-submit"
                 type="submit"
                 disabled={loading}
-                className="w-full h-11.5 mt-1 bg-[#FF6F61] hover:bg-[#ff5b4c] active:scale-[0.98] disabled:opacity-70 disabled:pointer-events-none text-white font-black text-sm sm:text-base rounded-xl shadow-[0_6px_18px_rgba(255,111,97,0.35)] flex items-center justify-center transition-all cursor-pointer select-none"
+                className="w-full h-10 sm:h-11.5 mt-0.5 sm:mt-1 bg-[#FF6F61] hover:bg-[#ff5b4c] active:scale-[0.98] disabled:opacity-70 disabled:pointer-events-none text-white font-black text-xs sm:text-base rounded-xl shadow-[0_6px_18px_rgba(255,111,97,0.35)] flex items-center justify-center transition-all cursor-pointer select-none"
               >
                 {loading ? 'Đang tạo tài khoản...' : 'TẠO TÀI KHOẢN'}
               </button>

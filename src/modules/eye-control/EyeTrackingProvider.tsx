@@ -62,7 +62,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     const defaultSpeechRate = savedSpeechRate !== null ? Math.max(0.7, Math.min(1.5, parseFloat(savedSpeechRate))) : 1.0;
 
     let base: EyeControlSettings = {
-      eyeControlEnabled: true,
+      eyeControlEnabled: false,
       dwellTimeMs: 1500,
       soundFeedback: true,
       simulatorMode: true,

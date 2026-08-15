@@ -130,26 +130,26 @@ export function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormProps) {
   };
 
   return (
-    <div className="flex flex-col gap-3 select-none">
+    <div className="flex flex-col gap-2.5 sm:gap-3 select-none">
       {/* Title & Quick Demo */}
       <div className="flex items-center justify-between">
         <div className="flex flex-col">
-          <h3 className="font-black text-lg sm:text-xl text-[#0A192F] tracking-tight">
+          <h3 className="font-black text-base sm:text-xl text-[#0A192F] tracking-tight">
             Chào mừng trở lại
           </h3>
-          <span className="text-xs font-extrabold text-[#1E293B]">
+          <span className="text-[11px] sm:text-xs font-extrabold text-[#1E293B]">
             Nhập thông tin để tiếp tục
           </span>
         </div>
 
         {/* Demo Fast Access */}
-        <div className="flex items-center gap-1.5 text-xs font-black text-[#0A192F]">
+        <div className="flex items-center gap-1 text-[11px] sm:text-xs font-black text-[#0A192F]">
           <span>Demo:</span>
           <button
             type="button"
             onClick={() => handleQuickDemo(1)}
             disabled={loading}
-            className="px-2 py-0.5 rounded-lg bg-white/40 hover:bg-white/60 border border-white/60 text-[#0A192F] font-black text-xs transition-colors cursor-pointer shadow-2xs"
+            className="px-2 py-0.5 rounded-lg bg-white/40 hover:bg-white/60 border border-white/60 text-[#0A192F] font-black text-[11px] sm:text-xs transition-colors cursor-pointer shadow-2xs"
           >
             An
           </button>
@@ -157,7 +157,7 @@ export function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormProps) {
             type="button"
             onClick={() => handleQuickDemo(2)}
             disabled={loading}
-            className="px-2 py-0.5 rounded-lg bg-white/40 hover:bg-white/60 border border-white/60 text-[#0A192F] font-black text-xs transition-colors cursor-pointer shadow-2xs"
+            className="px-2 py-0.5 rounded-lg bg-white/40 hover:bg-white/60 border border-white/60 text-[#0A192F] font-black text-[11px] sm:text-xs transition-colors cursor-pointer shadow-2xs"
           >
             Bình
           </button>
@@ -168,7 +168,7 @@ export function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormProps) {
       {errorMsg && (
         <div
           role="alert"
-          className="p-2.5 bg-rose-500/25 border border-rose-500/50 text-rose-950 rounded-xl text-xs font-black flex items-center gap-2 animate-in fade-in duration-150"
+          className="p-2 sm:p-2.5 bg-rose-500/25 border border-rose-500/50 text-rose-950 rounded-xl text-xs font-black flex items-center gap-2 animate-in fade-in duration-150"
         >
           <AlertCircle className="w-4 h-4 text-rose-800 shrink-0" />
           <span>{errorMsg}</span>
@@ -179,17 +179,17 @@ export function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormProps) {
       {forgotNotice && (
         <div
           role="status"
-          className="p-2.5 bg-sky-500/25 border border-sky-400 text-[#0A192F] rounded-xl text-xs font-black flex items-center gap-2 animate-in fade-in duration-150"
+          className="p-2 sm:p-2.5 bg-sky-500/25 border border-sky-400 text-[#0A192F] rounded-xl text-xs font-black flex items-center gap-2 animate-in fade-in duration-150"
         >
           <span>{forgotNotice}</span>
         </div>
       )}
 
       {/* Form Fields */}
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:gap-3">
         {/* Email Field */}
         <div>
-          <label htmlFor="login-email" className="block text-xs font-black text-[#0A192F] mb-1">
+          <label htmlFor="login-email" className="block text-[11px] sm:text-xs font-black text-[#0A192F] mb-0.5 sm:mb-1">
             Email / Số điện thoại
           </label>
           <input
@@ -200,20 +200,20 @@ export function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormProps) {
             placeholder="Nhập email hoặc số điện thoại"
             autoComplete="email"
             disabled={loading}
-            className="w-full h-11 px-3.5 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-sm shadow-2xs backdrop-blur-xs"
+            className="w-full h-9.5 sm:h-11 px-3 sm:px-3.5 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-xs sm:text-sm shadow-2xs backdrop-blur-xs"
           />
         </div>
 
         {/* Password Field */}
         <div>
-          <div className="flex items-center justify-between mb-1">
-            <label htmlFor="login-password" className="block text-xs font-black text-[#0A192F]">
+          <div className="flex items-center justify-between mb-0.5 sm:mb-1">
+            <label htmlFor="login-password" className="block text-[11px] sm:text-xs font-black text-[#0A192F]">
               Mật khẩu
             </label>
             <button
               type="button"
               onClick={handleForgotPassword}
-              className="text-xs font-black text-[#0E6C99] hover:underline cursor-pointer"
+              className="text-[11px] sm:text-xs font-black text-[#0E6C99] hover:underline cursor-pointer"
             >
               Quên mật khẩu?
             </button>
@@ -227,7 +227,7 @@ export function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormProps) {
               placeholder="Nhập mật khẩu của bạn"
               autoComplete="current-password"
               disabled={loading}
-              className="w-full h-11 pl-3.5 pr-10 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-sm shadow-2xs backdrop-blur-xs"
+              className="w-full h-9.5 sm:h-11 pl-3 sm:pl-3.5 pr-10 bg-white/30 hover:bg-white/40 focus:bg-white/55 border border-white/50 focus:border-[#0E6C99] focus:ring-2 focus:ring-[#0E6C99]/30 rounded-xl font-black text-[#0A192F] placeholder:text-[#1E293B]/70 outline-none transition-all text-xs sm:text-sm shadow-2xs backdrop-blur-xs"
             />
             <button
               type="button"
@@ -246,7 +246,7 @@ export function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormProps) {
             id="btn-login-submit"
             type="submit"
             disabled={loading}
-            className="w-full h-11.5 mt-1 bg-[#FF6F61] hover:bg-[#ff5b4c] active:scale-[0.98] disabled:opacity-70 disabled:pointer-events-none text-white font-black text-sm sm:text-base rounded-xl shadow-[0_6px_18px_rgba(255,111,97,0.35)] flex items-center justify-center transition-all cursor-pointer select-none"
+            className="w-full h-10 sm:h-11.5 mt-0.5 sm:mt-1 bg-[#FF6F61] hover:bg-[#ff5b4c] active:scale-[0.98] disabled:opacity-70 disabled:pointer-events-none text-white font-black text-xs sm:text-base rounded-xl shadow-[0_6px_18px_rgba(255,111,97,0.35)] flex items-center justify-center transition-all cursor-pointer select-none"
           >
             {loading ? 'Đang đăng nhập...' : 'ĐĂNG NHẬP'}
           </button>

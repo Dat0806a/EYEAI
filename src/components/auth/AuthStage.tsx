@@ -13,24 +13,30 @@ export interface AuthStageProps {
 
 export function AuthStage({ mode, onModeChange, onLoginSuccess }: AuthStageProps) {
   return (
-    <div className="fixed inset-0 w-full h-[100dvh] overflow-hidden bg-[#75CBEB] flex flex-col justify-end select-none z-10">
+    <div
+      className="fixed inset-0 w-full h-[100dvh] overflow-y-auto overscroll-none bg-[#75CBEB] flex flex-col justify-end items-center select-none z-10"
+      style={{
+        paddingTop: 'env(safe-area-inset-top, 0px)',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+      }}
+    >
       {/* 
         Full-Screen Background Video
         Mascot and scenery float in the upper/middle screen area behind the transparent form
       */}
-      <div className="absolute inset-0 w-full h-full pointer-events-none z-0">
+      <div className="fixed inset-0 w-full h-full pointer-events-none z-0">
         <AuthBackgroundVideo />
       </div>
 
       {/* 
-        Bottom Sheet Form Overlay: Transparent Glassmorphism Style
+        Bottom Sheet Form Overlay: Responsive Mobile Glassmorphism Container
       */}
       <div
         id="auth-bottom-sheet"
-        className="relative z-10 w-full max-w-lg mx-auto bg-white/10 backdrop-blur-md rounded-t-[28px] sm:rounded-t-[32px] p-5 sm:p-6 border-t border-white/30 shadow-[0_-8px_36px_rgba(20,33,61,0.12)] overflow-hidden transition-all duration-300"
+        className="relative z-10 w-full max-w-md sm:max-w-lg mx-auto bg-white/15 backdrop-blur-md rounded-t-[24px] sm:rounded-t-[32px] p-3.5 sm:p-6 border-t border-white/40 shadow-[0_-8px_36px_rgba(20,33,61,0.18)] max-h-[88dvh] overflow-y-auto transition-all duration-300 touch-pan-y"
       >
         {/* Top Segmented Tabs: Đăng nhập & Đăng ký */}
-        <div className="flex items-center justify-center p-1 rounded-2xl bg-black/10 backdrop-blur-xs border border-white/30 mb-4">
+        <div className="flex items-center justify-center p-1 rounded-2xl bg-black/10 backdrop-blur-xs border border-white/30 mb-2.5 sm:mb-4">
           <EyeFocusable
             id="auth-tab-login"
             onSelect={() => onModeChange('login')}
