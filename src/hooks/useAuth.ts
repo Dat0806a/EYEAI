@@ -20,31 +20,46 @@ export function useAuth() {
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // 1. Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id, session.user);
-      } else {
+    // 1. Get initial session with fail-safe error handling
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          fetchProfile(session.user.id, session.user);
+        } else {
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.warn('[Auth] getSession failed or fallback active:', err);
         setLoading(false);
-      }
-    });
+      });
 
-    // 2. Listen to Auth changes
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchProfile(session.user.id, session.user);
-      } else {
-        setProfile(null);
-        setLoading(false);
-      }
-    });
+    // 2. Listen to Auth changes safely
+    let subscription: any = null;
+    try {
+      const { data } = supabase.auth.onAuthStateChange(async (_event, session) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await fetchProfile(session.user.id, session.user);
+        } else {
+          setProfile(null);
+          setLoading(false);
+        }
+      });
+      subscription = data?.subscription;
+    } catch (err) {
+      console.warn('[Auth] onAuthStateChange failed:', err);
+      setLoading(false);
+    }
 
     return () => {
-      authListener.subscription.unsubscribe();
+      if (subscription && typeof subscription.unsubscribe === 'function') {
+        subscription.unsubscribe();
+      }
     };
   }, []);
 

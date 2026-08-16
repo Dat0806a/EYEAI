@@ -24,6 +24,7 @@ import { AuthPage } from './pages/AuthPage';
 import { useAuth } from './hooks/useAuth';
 import { TutorialProvider, useTutorial } from './context/TutorialContext';
 import { OnboardingModal } from './components/ui/OnboardingModal';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
 
 // Patient Experience Imports
 import { PatientDashboardPage } from './experiences/patient/pages/PatientDashboardPage';
@@ -451,8 +452,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <TutorialProvider>
-      <AppContent />
-    </TutorialProvider>
+    <ErrorBoundary>
+      <TutorialProvider>
+        <AppContent />
+      </TutorialProvider>
+    </ErrorBoundary>
   );
 }
