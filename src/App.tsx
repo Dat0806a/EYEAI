@@ -175,10 +175,8 @@ function AppContent() {
   };
 
   return (
-    <EyeTrackingProvider>
-      <EyeNavigationProvider>
-        <CallProvider>
-          {/* iOS Safari Audio Unlock Helper Banner */}
+    <>
+      {/* iOS Safari Audio Unlock Helper Banner */}
           <AudioUnlockBanner />
 
           {/* 0. Startup Splash Screen with Real Preloader */}
@@ -444,9 +442,7 @@ function AppContent() {
 
           {/* Onboarding Tutorial Modal */}
           <OnboardingModal isOpen={isTutorialOpen} onClose={closeTutorial} />
-        </CallProvider>
-      </EyeNavigationProvider>
-    </EyeTrackingProvider>
+    </>
   );
 }
 
@@ -454,7 +450,13 @@ export default function App() {
   return (
     <ErrorBoundary>
       <TutorialProvider>
-        <AppContent />
+        <EyeTrackingProvider>
+          <EyeNavigationProvider>
+            <CallProvider>
+              <AppContent />
+            </CallProvider>
+          </EyeNavigationProvider>
+        </EyeTrackingProvider>
       </TutorialProvider>
     </ErrorBoundary>
   );
