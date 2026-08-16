@@ -144,14 +144,12 @@ export function VirtualKeyboard({
 
           {onClose && (
             <EyeFocusable id="btn-close-keyboard" onSelect={onClose}>
-              <button
-                type="button"
-                onClick={onClose}
-                className="p-1 rounded-full bg-white/80 hover:bg-white text-[#14213D] border border-[#14213D]/10 shadow-2xs active:scale-95 transition-all cursor-pointer"
+              <div
+                className="p-1 rounded-full bg-white/80 hover:bg-white text-[#14213D] border border-[#14213D]/10 shadow-2xs active:scale-95 transition-all cursor-pointer pointer-events-none"
                 title="Đóng bàn phím"
               >
                 <ChevronDown className="w-4 h-4" />
-              </button>
+              </div>
             </EyeFocusable>
           )}
         </div>
@@ -197,10 +195,8 @@ export function VirtualKeyboard({
                       item.colorClass || (isSend ? defaultSendBg : '')
                     }`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => handleKeyClick(item)}
-                      className="w-full h-full flex items-center justify-center px-1 truncate pointer-events-auto"
+                    <div
+                      className="w-full h-full flex items-center justify-center px-1 truncate pointer-events-none"
                     >
                       {isBackspace ? (
                         <Delete className="w-4 h-4 sm:w-5 sm:h-5 text-amber-900" />
@@ -222,7 +218,7 @@ export function VirtualKeyboard({
                       ) : (
                         <span>{buttonLabel}</span>
                       )}
-                    </button>
+                    </div>
                   </EyeFocusable>
                 );
               })}

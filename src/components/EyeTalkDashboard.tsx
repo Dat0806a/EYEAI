@@ -233,8 +233,8 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
   };
 
   // Perform letter selection on virtual keyboard
-  const triggerSelection = () => {
-    const item = grid[focusedRowRef.current][focusedColRef.current];
+  const triggerSelection = (targetItem?: any) => {
+    const item = targetItem || grid[focusedRowRef.current]?.[focusedColRef.current];
     if (!item) return;
 
     if (item.type === 'phrase') {
@@ -1306,7 +1306,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
                           onClick={() => {
                             // Enable intuitive pointing via mouse/touch as standard accessibility fallback
                             setFocusIndex({ row: rowIndex, col: colIndex });
-                            triggerSelection();
+                            triggerSelection(item);
                           }}
                           className={`
                             relative flex items-center justify-center border-2 rounded-xl transition-all duration-150 cursor-pointer select-none active:scale-95 ${btnHeight} ${defaultBg}

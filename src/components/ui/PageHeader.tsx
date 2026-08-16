@@ -1,7 +1,8 @@
 import React, { memo } from 'react';
-import { Eye, Settings as SettingsIcon, ArrowLeft } from 'lucide-react';
+import { Eye, Settings as SettingsIcon, ArrowLeft, HelpCircle } from 'lucide-react';
 import { EyeFocusable } from '../../modules/eye-control/EyeFocusable';
 import { useEyeTrackingSettings } from '../../modules/eye-control/useEyeTracking';
+import { useTutorial } from '../../context/TutorialContext';
 import { KeyboardHudSlot } from './KeyboardHudSlot';
 
 interface PageHeaderProps {
@@ -9,6 +10,7 @@ interface PageHeaderProps {
   showBack?: boolean;
   onBack?: () => void;
   onOpenSettings?: () => void;
+  onOpenHelp?: () => void;
 }
 
 export const PageHeader = memo(function PageHeader({
@@ -16,9 +18,19 @@ export const PageHeader = memo(function PageHeader({
   showBack = false,
   onBack,
   onOpenSettings,
+  onOpenHelp,
 }: PageHeaderProps) {
   const { settings, setEyeControlEnabled } = useEyeTrackingSettings();
+  const { openTutorial } = useTutorial();
   const isEyeMode = settings.eyeControlEnabled;
+
+  const handleHelpClick = () => {
+    if (onOpenHelp) {
+      onOpenHelp();
+    } else {
+      openTutorial();
+    }
+  };
 
   return (
     <div className="sticky top-0 z-[50] w-full flex flex-col">
@@ -86,6 +98,17 @@ export const PageHeader = memo(function PageHeader({
               />
               <span className="tracking-wide">EYE MODE {isEyeMode ? 'ON' : 'OFF'}</span>
             </button>
+          </EyeFocusable>
+
+          {/* Accessible Help / Tutorial Icon (?) Button - Beside Settings */}
+          <EyeFocusable id="btn-header-help" onSelect={handleHelpClick} speakLabel="Hướng dẫn sử dụng">
+            <div
+              className="p-2.5 rounded-[16px] bg-white border-2 border-[#14213D]/15 text-[#14213D] hover:bg-slate-50 hover:border-[#6AC9F0] active:scale-95 transition-all min-h-[48px] min-w-[48px] flex items-center justify-center shadow-xs cursor-pointer"
+              aria-label="Hướng dẫn sử dụng"
+              title="Hướng dẫn sử dụng"
+            >
+              <HelpCircle className="w-5 h-5 text-[#14213D]" />
+            </div>
           </EyeFocusable>
 
           {/* Accessible Settings Button with Generous Hitbox */}

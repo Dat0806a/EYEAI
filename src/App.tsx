@@ -21,6 +21,8 @@ import { preloadManager, PreloadProgressState } from './services/preloadManager'
 
 import { AuthPage } from './pages/AuthPage';
 import { useAuth } from './hooks/useAuth';
+import { TutorialProvider, useTutorial } from './context/TutorialContext';
+import { OnboardingModal } from './components/ui/OnboardingModal';
 
 // Patient Experience Imports
 import { PatientDashboardPage } from './experiences/patient/pages/PatientDashboardPage';
@@ -51,7 +53,8 @@ export type AppRoute =
   | 'patient-analysis'
   | 'patient-history';
 
-export default function App() {
+function AppContent() {
+  const { isTutorialOpen, openTutorial, closeTutorial } = useTutorial();
   const { isAuthenticated, profile, loading: authLoading } = useAuth();
   const [currentRoute, setCurrentRoute] = useState<AppRoute>('home');
   const [chatFriend, setChatFriend] = useState<{
@@ -149,6 +152,7 @@ export default function App() {
 
   const handleLoginSuccess = () => {
     setHasPassedAuth(true);
+    openTutorial();
     if (profile?.account_type === 'patient') {
       navigateTo('patient-home');
     } else {
@@ -427,8 +431,19 @@ export default function App() {
               </AnimatePresence>
             </div>
           </div>
+
+          {/* Onboarding Tutorial Modal */}
+          <OnboardingModal isOpen={isTutorialOpen} onClose={closeTutorial} />
         </CallProvider>
       </EyeNavigationProvider>
     </EyeTrackingProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <TutorialProvider>
+      <AppContent />
+    </TutorialProvider>
   );
 }

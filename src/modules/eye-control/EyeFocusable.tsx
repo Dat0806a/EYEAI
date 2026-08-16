@@ -81,7 +81,18 @@ export const EyeFocusable = memo(function EyeFocusable({
     return clean;
   }, []);
 
-  const handleSelect = useCallback(() => {
+  const lastSelectTimeRef = useRef<number>(0);
+
+  const handleSelect = useCallback((e?: React.SyntheticEvent) => {
+    if (e && typeof e.stopPropagation === 'function') {
+      e.stopPropagation();
+    }
+    const now = Date.now();
+    if (now - lastSelectTimeRef.current < 350) {
+      return;
+    }
+    lastSelectTimeRef.current = now;
+
     setFocusId(id);
     setIsSelecting(true);
     setTimeout(() => setIsSelecting(false), 180);
