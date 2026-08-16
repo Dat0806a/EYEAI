@@ -6,7 +6,7 @@ import { EyeTextComposer } from '../modules/virtual-keyboard/EyeTextComposer';
 import { VirtualKeyboard } from '../modules/virtual-keyboard/VirtualKeyboard';
 import { applyVietnameseAccents } from '../modules/virtual-keyboard/vietnameseTelex';
 import { GridItem } from '../modules/virtual-keyboard/types';
-import { speakVietnamese, stopSpeech, isSpeaking as checkIsSpeaking } from '../utils/speech';
+import { speakVietnamese, stopSpeech, isSpeaking as checkIsSpeaking, isSpeechSupported } from '../utils/speech';
 import { useCall } from '../modules/calls/CallProvider';
 
 interface SpeakPageProps {
@@ -53,7 +53,7 @@ export function SpeakPage({ onBack }: SpeakPageProps) {
   // Web Speech API browser compatibility check & Cleanup on unmount
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      setSpeechSupported('speechSynthesis' in window);
+      setSpeechSupported(isSpeechSupported());
     }
 
     return () => {

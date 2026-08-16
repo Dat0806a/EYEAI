@@ -83,7 +83,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
 
   const [accountNotice, setAccountNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
+  const speechSupported = typeof window !== 'undefined' && isSpeechSupported();
 
   // Handlers for Account Settings
   const handleStartEditName = () => {

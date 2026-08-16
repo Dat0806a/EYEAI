@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Volume2, CheckCircle2 } from 'lucide-react';
+import { Volume2 } from 'lucide-react';
 import { unlockAudio, speakVietnamese } from '../../utils/speech';
 
 export function AudioUnlockBanner() {
   const [unlocked, setUnlocked] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
     const handleTap = () => {
       unlockAudio();
-      setUnlocked(true);
     };
 
     window.addEventListener('pointerdown', handleTap, { passive: true });
@@ -21,14 +19,14 @@ export function AudioUnlockBanner() {
     };
   }, []);
 
-  const handleEnableClick = () => {
+  const handleEnableClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
     unlockAudio();
     setUnlocked(true);
-    setDismissed(true);
     speakVietnamese('Âm thanh trợ lý EyeTalk đã sẵn sàng');
   };
 
-  if (unlocked || dismissed) return null;
+  if (unlocked) return null;
 
   return (
     <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[100] w-[92%] max-w-md pointer-events-auto transition-all animate-bounce">
@@ -48,3 +46,4 @@ export function AudioUnlockBanner() {
     </div>
   );
 }
+
