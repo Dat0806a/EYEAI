@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { EyeTrackingProvider } from './modules/eye-control/EyeTrackingProvider';
 import { EyeNavigationProvider } from './modules/eye-control/EyeNavigationProvider';
+import { useEyeTrackingSettings } from './modules/eye-control/useEyeTracking';
 import { CallProvider } from './modules/calls/CallProvider';
 import { GlobalEyeHUD } from './components/ui/GlobalEyeHUD';
 import { HomePage } from './pages/HomePage';
@@ -56,7 +57,15 @@ export type AppRoute =
 function AppContent() {
   const { isTutorialOpen, openTutorial, closeTutorial } = useTutorial();
   const { isAuthenticated, profile, loading: authLoading } = useAuth();
+  const { settings, setEyeControlEnabled } = useEyeTrackingSettings();
   const [currentRoute, setCurrentRoute] = useState<AppRoute>('home');
+
+  // Auto-disable eye control mode for patient accounts
+  useEffect(() => {
+    if (profile?.account_type === 'patient' && settings.eyeControlEnabled) {
+      setEyeControlEnabled(false);
+    }
+  }, [profile?.account_type, settings.eyeControlEnabled, setEyeControlEnabled]);
   const [chatFriend, setChatFriend] = useState<{
     id: string;
     name: string;
@@ -186,7 +195,7 @@ function AppContent() {
           </AnimatePresence>
 
           {/* Global Accessibility Eye Camera HUD */}
-          {!isSplashActive && !shouldShowAuth && (
+          {!isSplashActive && !shouldShowAuth && profile?.account_type !== 'patient' && (
             <GlobalEyeHUD variant="floating" currentRoute={currentRoute} />
           )}
 

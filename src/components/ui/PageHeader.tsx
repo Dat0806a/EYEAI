@@ -3,6 +3,7 @@ import { Eye, Settings as SettingsIcon, ArrowLeft, HelpCircle } from 'lucide-rea
 import { EyeFocusable } from '../../modules/eye-control/EyeFocusable';
 import { useEyeTrackingSettings } from '../../modules/eye-control/useEyeTracking';
 import { useTutorial } from '../../context/TutorialContext';
+import { useAuth } from '../../hooks/useAuth';
 import { KeyboardHudSlot } from './KeyboardHudSlot';
 
 interface PageHeaderProps {
@@ -22,7 +23,9 @@ export const PageHeader = memo(function PageHeader({
 }: PageHeaderProps) {
   const { settings, setEyeControlEnabled } = useEyeTrackingSettings();
   const { openTutorial } = useTutorial();
+  const { profile } = useAuth();
   const isEyeMode = settings.eyeControlEnabled;
+  const isPatient = profile?.account_type === 'patient';
 
   const handleHelpClick = () => {
     if (onOpenHelp) {
@@ -75,30 +78,32 @@ export const PageHeader = memo(function PageHeader({
         </div>
 
         <div className="flex items-center gap-2.5">
-          {/* Eye Mode Interactive Toggle Button Pill */}
-          <EyeFocusable
-            id="btn-header-eyemode-toggle"
-            onSelect={() => setEyeControlEnabled(!isEyeMode)}
-            speakLabel={isEyeMode ? 'Chế độ mắt đang bật' : 'Chế độ mắt đang tắt'}
-          >
-            <button
-              type="button"
-              onClick={() => setEyeControlEnabled(!isEyeMode)}
-              title={isEyeMode ? 'Tắt Eye Mode' : 'Bật Eye Mode'}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black border-2 transition-all cursor-pointer active:scale-95 select-none ${
-                isEyeMode
-                  ? 'bg-[#6AC9F0]/20 text-[#14213D] border-[#6AC9F0]/60 shadow-xs hover:bg-[#6AC9F0]/30'
-                  : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
-              }`}
+          {/* Eye Mode Interactive Toggle Button Pill (Only for Impaired Accounts) */}
+          {!isPatient && (
+            <EyeFocusable
+              id="btn-header-eyemode-toggle"
+              onSelect={() => setEyeControlEnabled(!isEyeMode)}
+              speakLabel={isEyeMode ? 'Chế độ mắt đang bật' : 'Chế độ mắt đang tắt'}
             >
-              <span
-                className={`w-2.5 h-2.5 rounded-full ${
-                  isEyeMode ? 'bg-[#6AC9F0] animate-pulse shadow-[0_0_8px_#6AC9F0]' : 'bg-rose-500'
+              <button
+                type="button"
+                onClick={() => setEyeControlEnabled(!isEyeMode)}
+                title={isEyeMode ? 'Tắt Eye Mode' : 'Bật Eye Mode'}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black border-2 transition-all cursor-pointer active:scale-95 select-none ${
+                  isEyeMode
+                    ? 'bg-[#6AC9F0]/20 text-[#14213D] border-[#6AC9F0]/60 shadow-xs hover:bg-[#6AC9F0]/30'
+                    : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
                 }`}
-              />
-              <span className="tracking-wide">EYE MODE {isEyeMode ? 'ON' : 'OFF'}</span>
-            </button>
-          </EyeFocusable>
+              >
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    isEyeMode ? 'bg-[#6AC9F0] animate-pulse shadow-[0_0_8px_#6AC9F0]' : 'bg-rose-500'
+                  }`}
+                />
+                <span className="tracking-wide">EYE MODE {isEyeMode ? 'ON' : 'OFF'}</span>
+              </button>
+            </EyeFocusable>
+          )}
 
           {/* Accessible Help / Tutorial Icon (?) Button - Beside Settings */}
           <EyeFocusable id="btn-header-help" onSelect={handleHelpClick} speakLabel="Hướng dẫn sử dụng">

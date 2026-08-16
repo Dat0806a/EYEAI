@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import { useEyeTrackingSettings, useEyeTrackingTelemetry } from '../../modules/eye-control/useEyeTracking';
 import { Eye, EyeOff } from 'lucide-react';
 import { CameraPreview } from '../../modules/eye-control/CameraPreview';
+import { useAuth } from '../../hooks/useAuth';
 
 export interface GlobalEyeHUDProps {
   variant?: 'floating' | 'keyboard-bar' | 'auto';
@@ -14,6 +15,12 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
 }: GlobalEyeHUDProps) {
   const { settings, setEyeControlEnabled, isKeyboardOpen } = useEyeTrackingSettings();
   const { trackingState } = useEyeTrackingTelemetry();
+  const { profile } = useAuth();
+
+  // Do not render Camera HUD for patient accounts
+  if (profile?.account_type === 'patient') {
+    return null;
+  }
 
   // Do not render Camera HUD on Auth / Login / Register screens
   const isAuthRoute = currentRoute === 'auth' || currentRoute === 'login' || currentRoute === 'register';

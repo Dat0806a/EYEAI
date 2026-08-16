@@ -61,6 +61,8 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
     updateDisplayName,
   } = useAuth();
 
+  const isPatient = profile?.account_type === 'patient';
+
   const [speakerNotice, setSpeakerNotice] = useState<string | null>(null);
 
   // Account Settings States
@@ -120,6 +122,9 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
     setShowTypeConfirmModal(false);
 
     if (res.success) {
+      if (pendingAccountType === 'patient') {
+        setEyeControlEnabled(false);
+      }
       const label = ACCOUNT_TYPE_LABELS[pendingAccountType];
       speakVietnamese(`Đã chuyển loại tài khoản thành ${label}`);
       setAccountNotice({
@@ -468,134 +473,139 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
           </div>
         </div>
         
-        {/* Section 1: Master Eye Control Switch */}
-        <div className="bg-white rounded-[28px] p-6 border-2 border-[#14213D]/10 card-asymmetric shadow-sm flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-[16px] bg-[#6AC9F0]/20 text-[#14213D]">
-                <Eye className="w-6 h-6 text-[#14213D]" />
-              </div>
-              <div>
-                <h3 className="font-black text-lg text-[#14213D]">Hỗ trợ điều khiển bằng mắt</h3>
-                <p className="text-xs text-[#3B4B68]">Bật/Tắt Eye Mode và Camera trên toàn bộ app</p>
+        {/* Eye Control Settings Sections (Only for Impaired Accounts) */}
+        {!isPatient && (
+          <>
+            {/* Section 1: Master Eye Control Switch */}
+            <div className="bg-white rounded-[28px] p-6 border-2 border-[#14213D]/10 card-asymmetric shadow-sm flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 rounded-[16px] bg-[#6AC9F0]/20 text-[#14213D]">
+                    <Eye className="w-6 h-6 text-[#14213D]" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-lg text-[#14213D]">Hỗ trợ điều khiển bằng mắt</h3>
+                    <p className="text-xs text-[#3B4B68]">Bật/Tắt Eye Mode và Camera trên toàn bộ app</p>
+                  </div>
+                </div>
+
+                <EyeFocusable
+                  id="btn-setting-toggle-eyemode"
+                  onSelect={() => setEyeControlEnabled(!settings.eyeControlEnabled)}
+                  speakLabel="Chuyển đổi điều khiển bằng mắt"
+                >
+                  <AppButton
+                    id="btn-setting-toggle-eyemode"
+                    variant={settings.eyeControlEnabled ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => setEyeControlEnabled(!settings.eyeControlEnabled)}
+                  >
+                    <span>{settings.eyeControlEnabled ? 'ĐANG BẬT' : 'ĐÃ TẮT'}</span>
+                  </AppButton>
+                </EyeFocusable>
               </div>
             </div>
 
-            <EyeFocusable
-              id="btn-setting-toggle-eyemode"
-              onSelect={() => setEyeControlEnabled(!settings.eyeControlEnabled)}
-              speakLabel="Chuyển đổi điều khiển bằng mắt"
-            >
-              <AppButton
-                id="btn-setting-toggle-eyemode"
-                variant={settings.eyeControlEnabled ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => setEyeControlEnabled(!settings.eyeControlEnabled)}
-              >
-                <span>{settings.eyeControlEnabled ? 'ĐANG BẬT' : 'ĐÃ TẮT'}</span>
-              </AppButton>
-            </EyeFocusable>
-          </div>
-        </div>
+            {/* Section 2: Camera Status & Live Preview */}
+            <div className="bg-white rounded-[28px] p-6 border-2 border-[#14213D]/10 card-asymmetric shadow-sm flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-black text-lg text-[#14213D] flex items-center gap-2">
+                  <Camera className="w-5 h-5 text-[#6AC9F0]" />
+                  <span>Camera & Hiệu chỉnh mắt</span>
+                </h3>
+                <StatusBadge
+                  label={trackingState.cameraActive ? 'Camera Active' : 'Camera Stopped'}
+                  status={trackingState.cameraActive ? 'active' : 'idle'}
+                />
+              </div>
 
-        {/* Section 2: Camera Status & Live Preview */}
-        <div className="bg-white rounded-[28px] p-6 border-2 border-[#14213D]/10 card-asymmetric shadow-sm flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-black text-lg text-[#14213D] flex items-center gap-2">
-              <Camera className="w-5 h-5 text-[#6AC9F0]" />
-              <span>Camera & Hiệu chỉnh mắt</span>
-            </h3>
-            <StatusBadge
-              label={trackingState.cameraActive ? 'Camera Active' : 'Camera Stopped'}
-              status={trackingState.cameraActive ? 'active' : 'idle'}
-            />
-          </div>
+              {/* Real Live Camera Preview */}
+              <div className="w-full rounded-[20px] overflow-hidden border-2 border-[#14213D]/15 shadow-inner bg-slate-900 h-52 sm:h-64 relative">
+                <CameraPreview className="w-full h-full" mirrored showOverlay />
+              </div>
 
-          {/* Real Live Camera Preview */}
-          <div className="w-full rounded-[20px] overflow-hidden border-2 border-[#14213D]/15 shadow-inner bg-slate-900 h-52 sm:h-64 relative">
-            <CameraPreview className="w-full h-full" mirrored showOverlay />
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <EyeFocusable
+                  id="btn-setting-toggle-camera"
+                  onSelect={toggleCamera}
+                  speakLabel="Bật hoặc tắt camera"
+                >
+                  <AppButton
+                    id="btn-setting-toggle-camera"
+                    variant={trackingState.cameraActive ? 'secondary' : 'primary'}
+                    size="md"
+                    onClick={toggleCamera}
+                    icon={<Camera className="w-5 h-5" />}
+                  >
+                    <span>{trackingState.cameraActive ? 'Tắt Camera' : 'Bật Camera'}</span>
+                  </AppButton>
+                </EyeFocusable>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <EyeFocusable
-              id="btn-setting-toggle-camera"
-              onSelect={toggleCamera}
-              speakLabel="Bật hoặc tắt camera"
-            >
-              <AppButton
-                id="btn-setting-toggle-camera"
-                variant={trackingState.cameraActive ? 'secondary' : 'primary'}
-                size="md"
-                onClick={toggleCamera}
-                icon={<Camera className="w-5 h-5" />}
-              >
-                <span>{trackingState.cameraActive ? 'Tắt Camera' : 'Bật Camera'}</span>
-              </AppButton>
-            </EyeFocusable>
+                <EyeFocusable
+                  id="btn-setting-calibrate"
+                  onSelect={startCalibration}
+                  speakLabel="Bắt đầu hiệu chỉnh mắt"
+                >
+                  <AppButton
+                    id="btn-setting-calibrate"
+                    variant="outline"
+                    size="md"
+                    disabled={!trackingState.cameraActive}
+                    onClick={startCalibration}
+                    icon={<Target className="w-5 h-5 text-[#FF6F61]" />}
+                  >
+                    <span>Hiệu chỉnh mắt</span>
+                  </AppButton>
+                </EyeFocusable>
+              </div>
 
-            <EyeFocusable
-              id="btn-setting-calibrate"
-              onSelect={startCalibration}
-              speakLabel="Bắt đầu hiệu chỉnh mắt"
-            >
-              <AppButton
-                id="btn-setting-calibrate"
-                variant="outline"
-                size="md"
-                disabled={!trackingState.cameraActive}
-                onClick={startCalibration}
-                icon={<Target className="w-5 h-5 text-[#FF6F61]" />}
-              >
-                <span>Hiệu chỉnh mắt</span>
-              </AppButton>
-            </EyeFocusable>
-          </div>
-
-          {/* Calibration Progress Message */}
-          {calibrationStage !== 'idle' && (
-            <div className="p-4 rounded-[18px] bg-[#FFF2D6] border border-[#14213D]/15 flex flex-col gap-2">
-              <span className="font-bold text-sm text-[#14213D]">{calibrationMessage}</span>
-              {calibrationStage === 'collecting' && (
-                <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-                  <div
-                    className="bg-[#6AC9F0] h-full transition-all duration-100"
-                    style={{ width: `${calibrationProgress}%` }}
-                  />
+              {/* Calibration Progress Message */}
+              {calibrationStage !== 'idle' && (
+                <div className="p-4 rounded-[18px] bg-[#FFF2D6] border border-[#14213D]/15 flex flex-col gap-2">
+                  <span className="font-bold text-sm text-[#14213D]">{calibrationMessage}</span>
+                  {calibrationStage === 'collecting' && (
+                    <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                      <div
+                        className="bg-[#6AC9F0] h-full transition-all duration-100"
+                        style={{ width: `${calibrationProgress}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
 
-        {/* Section 3: Keyboard Simulator Mode */}
-        <div className="bg-white rounded-[28px] p-6 border-2 border-[#14213D]/10 card-asymmetric shadow-sm flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-[16px] bg-amber-100 text-amber-900">
-                <Keyboard className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-black text-lg text-[#14213D]">Giả lập Bàn phím physical</h3>
-                <p className="text-xs text-[#3B4B68]">Dùng các phím Mũi tên (← → ↑ ↓) và Enter để điều khiển</p>
+            {/* Section 3: Keyboard Simulator Mode */}
+            <div className="bg-white rounded-[28px] p-6 border-2 border-[#14213D]/10 card-asymmetric shadow-sm flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 rounded-[16px] bg-amber-100 text-amber-900">
+                    <Keyboard className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-lg text-[#14213D]">Giả lập Bàn phím physical</h3>
+                    <p className="text-xs text-[#3B4B68]">Dùng các phím Mũi tên (← → ↑ ↓) và Enter để điều khiển</p>
+                  </div>
+                </div>
+
+                <EyeFocusable
+                  id="btn-setting-toggle-simulator"
+                  onSelect={() => setSimulatorMode(!settings.simulatorMode)}
+                  speakLabel="Bật tắt giả lập bàn phím"
+                >
+                  <AppButton
+                    id="btn-setting-toggle-simulator"
+                    variant={settings.simulatorMode ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => setSimulatorMode(!settings.simulatorMode)}
+                  >
+                    <span>{settings.simulatorMode ? 'ĐANG BẬT' : 'ĐÃ TẮT'}</span>
+                  </AppButton>
+                </EyeFocusable>
               </div>
             </div>
-
-            <EyeFocusable
-              id="btn-setting-toggle-simulator"
-              onSelect={() => setSimulatorMode(!settings.simulatorMode)}
-              speakLabel="Bật tắt giả lập bàn phím"
-            >
-              <AppButton
-                id="btn-setting-toggle-simulator"
-                variant={settings.simulatorMode ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => setSimulatorMode(!settings.simulatorMode)}
-              >
-                <span>{settings.simulatorMode ? 'ĐANG BẬT' : 'ĐÃ TẮT'}</span>
-              </AppButton>
-            </EyeFocusable>
-          </div>
-        </div>
+          </>
+        )}
 
         {/* Section 4: ÂM THANH & GIỌNG NÓI */}
         <div className="bg-white rounded-[28px] p-6 border-2 border-[#14213D]/10 card-asymmetric shadow-sm flex flex-col gap-5">

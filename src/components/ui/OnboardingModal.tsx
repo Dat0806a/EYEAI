@@ -16,9 +16,14 @@ import {
   Sun,
   Sliders,
   Zap,
+  FileText,
+  Activity,
+  Utensils,
+  Dumbbell,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { EyeFocusable } from '../../modules/eye-control/EyeFocusable';
+import { useAuth } from '../../hooks/useAuth';
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -26,6 +31,9 @@ interface OnboardingModalProps {
 }
 
 export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
+  const { profile } = useAuth();
+  const isPatient = profile?.account_type === 'patient';
+
   const [currentSlide, setCurrentSlide] = useState<number>(0);
   const totalSlides = 3;
 
@@ -49,6 +57,18 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
     setCurrentSlide(0);
   };
 
+  const tabs = isPatient
+    ? [
+        { label: '1. Tổng Quan', icon: Sparkles },
+        { label: '2. Phân Tích Xét Nghiệm', icon: Activity },
+        { label: '3. Mẹo & Tiện Ích', icon: HelpCircle },
+      ]
+    : [
+        { label: '1. Tổng Quan App', icon: Sparkles },
+        { label: '2. Công Thức Giao Tiếp Mắt', icon: Eye },
+        { label: '3. Mẹo & Tiện Ích', icon: HelpCircle },
+      ];
+
   return (
     <Modal isOpen={isOpen} onClose={handleCloseModal} className="max-w-2xl bg-[#0F172A] border-2 border-[#6AC9F0]/50 text-white p-0 overflow-hidden shadow-[0_0_50px_rgba(106,201,240,0.25)]">
       <div className="relative flex flex-col min-h-[540px] max-h-[88vh]">
@@ -65,7 +85,9 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
                   Trang {currentSlide + 1} / {totalSlides}
                 </span>
               </h2>
-              <p className="text-xs text-sky-200 font-bold mt-0.5">Trợ lý giao tiếp bằng mắt LUCKY DREAM EyeAI</p>
+              <p className="text-xs text-sky-200 font-bold mt-0.5">
+                {isPatient ? 'Trợ lý theo dõi & phân tích kết quả xét nghiệm bệnh nhân' : 'Trợ lý giao tiếp bằng mắt LUCKY DREAM EyeAI'}
+              </p>
             </div>
           </div>
 
@@ -78,11 +100,7 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
 
         {/* Step Indicator Tabs - High Contrast */}
         <div className="flex border-b border-white/15 bg-[#0A101D] px-4 py-2.5 gap-2">
-          {[
-            { label: '1. Tổng Quan App', icon: Sparkles },
-            { label: '2. Công Thức Giao Tiếp Mắt', icon: Eye },
-            { label: '3. Mẹo & Tiện Ích', icon: HelpCircle },
-          ].map((tab, idx) => {
+          {tabs.map((tab, idx) => {
             const Icon = tab.icon;
             const isActive = currentSlide === idx;
             return (
@@ -124,12 +142,16 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
               >
                 <div className="bg-gradient-to-r from-[#14213D] via-[#1E2942] to-indigo-950 border-2 border-[#6AC9F0]/40 rounded-2xl p-4 flex items-start gap-3.5 shadow-md">
                   <div className="w-12 h-12 rounded-xl bg-[#6AC9F0] text-[#0F172A] flex items-center justify-center flex-shrink-0 font-black shadow-lg">
-                    <Eye className="w-7 h-7" />
+                    {isPatient ? <Activity className="w-7 h-7" /> : <Eye className="w-7 h-7" />}
                   </div>
                   <div>
-                    <h3 className="font-black text-white text-base sm:text-lg">Ứng dụng giao tiếp thông minh bằng ánh mắt</h3>
+                    <h3 className="font-black text-white text-base sm:text-lg">
+                      {isPatient ? 'Hệ thống hỗ trợ phân tích sức khỏe Bệnh nhân' : 'Ứng dụng giao tiếp thông minh bằng ánh mắt'}
+                    </h3>
                     <p className="text-xs sm:text-sm text-slate-100 mt-1 leading-relaxed font-medium">
-                      LUCKY DREAM EyeAI giúp người bệnh và người hạn chế vận động có thể tự do điều khiển giao diện, phát ra giọng nói, giải trí và gửi tín hiệu cứu hộ bằng ánh mắt mà không cần dùng tay.
+                      {isPatient
+                        ? 'LUCKY DREAM giúp bệnh nhân dễ dàng chụp ảnh quét giấy xét nghiệm, tra cứu các chỉ số sức khỏe, nhận đánh giá y tế tự động và thực đơn dinh dưỡng cá nhân hóa.'
+                        : 'LUCKY DREAM EyeAI giúp người bệnh và người hạn chế vận động có thể tự do điều khiển giao diện, phát ra giọng nói, giải trí và gửi tín hiệu cứu hộ bằng ánh mắt mà không cần dùng tay.'}
                     </p>
                   </div>
                 </div>
@@ -140,50 +162,96 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
                 </h4>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
-                    <div className="p-3 rounded-xl bg-amber-500/25 text-amber-300 border border-amber-500/40">
-                      <MessageSquare className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h5 className="font-extrabold text-sm sm:text-base text-white">Nói Chuyện Quick-Talk</h5>
-                      <p className="text-xs text-slate-200 font-medium">Câu nói có sẵn & gõ phím tiếng Việt</p>
-                    </div>
-                  </div>
+                  {isPatient ? (
+                    <>
+                      <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
+                        <div className="p-3 rounded-xl bg-amber-500/25 text-amber-300 border border-amber-500/40">
+                          <FileText className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h5 className="font-extrabold text-sm sm:text-base text-white">Quét Giấy Xét Nghiệm</h5>
+                          <p className="text-xs text-slate-200 font-medium">Nhận diện OCR tự động thông minh</p>
+                        </div>
+                      </div>
 
-                  <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
-                    <div className="p-3 rounded-xl bg-cyan-500/25 text-[#6AC9F0] border border-cyan-500/40">
-                      <Bot className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h5 className="font-extrabold text-sm sm:text-base text-white">Trợ Lý AI Thông Minh</h5>
-                      <p className="text-xs text-slate-200 font-medium">Hỏi đáp & tâm sự 24/7 bằng ánh mắt</p>
-                    </div>
-                  </div>
+                      <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
+                        <div className="p-3 rounded-xl bg-cyan-500/25 text-[#6AC9F0] border border-cyan-500/40">
+                          <Activity className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h5 className="font-extrabold text-sm sm:text-base text-white">Phân Tích Sức Khỏe AI</h5>
+                          <p className="text-xs text-slate-200 font-medium">Đánh giá chỉ số bình thường & bất thường</p>
+                        </div>
+                      </div>
 
-                  <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
-                    <div className="p-3 rounded-xl bg-purple-500/25 text-purple-300 border border-purple-500/40">
-                      <Tv className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h5 className="font-extrabold text-sm sm:text-base text-white">Giải Trí YouTube</h5>
-                      <p className="text-xs text-slate-200 font-medium">Xem ca nhạc, phim truyền hình trực tiếp</p>
-                    </div>
-                  </div>
+                      <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
+                        <div className="p-3 rounded-xl bg-emerald-500/25 text-emerald-300 border border-emerald-500/40">
+                          <Utensils className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h5 className="font-extrabold text-sm sm:text-base text-white">Gợi Ý Dinh Dưỡng</h5>
+                          <p className="text-xs text-slate-200 font-medium">Thực đơn chuẩn hỗ trợ điều trị</p>
+                        </div>
+                      </div>
 
-                  <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
-                    <div className="p-3 rounded-xl bg-red-500/25 text-red-300 border border-red-500/40">
-                      <PhoneCall className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h5 className="font-extrabold text-sm sm:text-base text-white">Liên Lạc & Cấp Cứu SOS</h5>
-                      <p className="text-xs text-slate-200 font-medium">Gọi người thân & phát chuông báo động</p>
-                    </div>
-                  </div>
+                      <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
+                        <div className="p-3 rounded-xl bg-purple-500/25 text-purple-300 border border-purple-500/40">
+                          <Dumbbell className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h5 className="font-extrabold text-sm sm:text-base text-white">Chế Độ Vận Động</h5>
+                          <p className="text-xs text-slate-200 font-medium">Bài tập cải thiện chỉ số y tế</p>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
+                        <div className="p-3 rounded-xl bg-amber-500/25 text-amber-300 border border-amber-500/40">
+                          <MessageSquare className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h5 className="font-extrabold text-sm sm:text-base text-white">Nói Chuyện Quick-Talk</h5>
+                          <p className="text-xs text-slate-200 font-medium">Câu nói có sẵn & gõ phím tiếng Việt</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
+                        <div className="p-3 rounded-xl bg-cyan-500/25 text-[#6AC9F0] border border-cyan-500/40">
+                          <Bot className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h5 className="font-extrabold text-sm sm:text-base text-white">Trợ Lý AI Thông Minh</h5>
+                          <p className="text-xs text-slate-200 font-medium">Hỏi đáp & tâm sự 24/7 bằng ánh mắt</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
+                        <div className="p-3 rounded-xl bg-purple-500/25 text-purple-300 border border-purple-500/40">
+                          <Tv className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h5 className="font-extrabold text-sm sm:text-base text-white">Giải Trí YouTube</h5>
+                          <p className="text-xs text-slate-200 font-medium">Xem ca nhạc, phim truyền hình trực tiếp</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-900 border-2 border-slate-750 p-3.5 rounded-2xl flex items-center gap-3 shadow-sm hover:border-[#6AC9F0]/40 transition-colors">
+                        <div className="p-3 rounded-xl bg-red-500/25 text-red-300 border border-red-500/40">
+                          <PhoneCall className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h5 className="font-extrabold text-sm sm:text-base text-white">Liên Lạc & Cấp Cứu SOS</h5>
+                          <p className="text-xs text-slate-200 font-medium">Gọi người thân & phát chuông báo động</p>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </motion.div>
             )}
 
-            {/* TRANG 2: CÔNG THỨC THAO TÁC MẮT (NHÁY 1, 2, 3 CÁI & NHẮM MẮT 1.5-2S, 2.5S+) */}
+            {/* TRANG 2: HUONG DAN HOAC CONG THUC */}
             {currentSlide === 1 && (
               <motion.div
                 key="slide-1"
@@ -193,108 +261,174 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
                 transition={{ duration: 0.2 }}
                 className="space-y-3.5"
               >
-                <div className="bg-gradient-to-r from-[#14213D] via-[#1E2942] to-slate-900 border-2 border-[#6AC9F0]/50 rounded-2xl p-4 shadow-md">
-                  <h3 className="font-black text-white text-base sm:text-lg flex items-center gap-2">
-                    <Target className="w-6 h-6 text-[#6AC9F0]" />
-                    Công Thức Thao Tác Mắt Độc Quyền
-                  </h3>
-                  <p className="text-xs sm:text-sm text-sky-200 font-semibold mt-1">
-                    Quy định số lần nháy mắt và thời gian nhắm mắt để điều khiển ứng dụng:
-                  </p>
-                </div>
-
-                {/* Danh sách 5 Công Thức Chi Tiết */}
-                <div className="space-y-2.5">
-                  {/* Quy tắc 1: Nháy 1 cái */}
-                  <div className="bg-gradient-to-r from-amber-950/90 to-slate-900 border-2 border-amber-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
-                    <div className="w-10 h-10 rounded-xl bg-amber-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
-                      👁️‍🗨️
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <h4 className="font-black text-white text-sm sm:text-base">Nháy 1 Cái</h4>
-                        <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-[#0F172A] font-black text-xs shadow-sm">
-                          CHỌN
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-100 font-medium mt-0.5">
-                        Nháy mắt 1 lần để <strong className="text-amber-300 font-bold">chọn nút bấm / kích hoạt tính năng</strong> tại điểm nhìn.
+                {isPatient ? (
+                  <>
+                    <div className="bg-gradient-to-r from-[#14213D] via-[#1E2942] to-slate-900 border-2 border-[#6AC9F0]/50 rounded-2xl p-4 shadow-md">
+                      <h3 className="font-black text-white text-base sm:text-lg flex items-center gap-2">
+                        <Target className="w-6 h-6 text-[#6AC9F0]" />
+                        Quy Trình Quét & Phân Tích Kết Quả Xét Nghiệm
+                      </h3>
+                      <p className="text-xs sm:text-sm text-sky-200 font-semibold mt-1">
+                        4 bước đơn giản để theo dõi chỉ số sức khỏe của bạn:
                       </p>
                     </div>
-                  </div>
 
-                  {/* Quy tắc 2: Nháy 2 cái */}
-                  <div className="bg-gradient-to-r from-purple-950/90 to-slate-900 border-2 border-purple-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
-                    <div className="w-10 h-10 rounded-xl bg-purple-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
-                      ➡️
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <h4 className="font-black text-white text-sm sm:text-base">Nháy 2 Cái</h4>
-                        <span className="px-2.5 py-0.5 rounded-full bg-purple-400 text-[#0F172A] font-black text-xs shadow-sm">
-                          SANG BÊN PHẢI
-                        </span>
+                    <div className="space-y-2.5">
+                      <div className="bg-slate-900 border-2 border-amber-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-amber-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
+                          1
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-black text-white text-sm sm:text-base">Quét Giấy Xét Nghiệm</h4>
+                          <p className="text-xs text-slate-200 font-medium mt-0.5">
+                            Chụp ảnh hoặc tải lên hình ảnh giấy xét nghiệm y tế của bạn.
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-xs text-slate-100 font-medium mt-0.5">
-                        Nháy mắt 2 lần liên tiếp để <strong className="text-amber-300 font-bold">di chuyển sang bên phải</strong>.
+
+                      <div className="bg-slate-900 border-2 border-cyan-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-cyan-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
+                          2
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-black text-white text-sm sm:text-base">Rà Soát & Xác Nhận</h4>
+                          <p className="text-xs text-slate-200 font-medium mt-0.5">
+                            Hệ thống tự động trích xuất các chỉ số OCR, cho phép bạn chỉnh sửa nếu cần.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-900 border-2 border-purple-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-purple-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
+                          3
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-black text-white text-sm sm:text-base">Xem Đánh Giá Báo Cáo AI</h4>
+                          <p className="text-xs text-slate-200 font-medium mt-0.5">
+                            Xem tổng quan tình trạng chỉ số, mức độ bình thường hoặc cảnh báo bất thường.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-900 border-2 border-emerald-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
+                          4
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-black text-white text-sm sm:text-base">Gợi Ý Thực Đơn & Tập Luyện</h4>
+                          <p className="text-xs text-slate-200 font-medium mt-0.5">
+                            Nhận danh sách thực đơn món ăn và chế độ vận động hỗ trợ cải thiện sức khỏe.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="bg-gradient-to-r from-[#14213D] via-[#1E2942] to-slate-900 border-2 border-[#6AC9F0]/50 rounded-2xl p-4 shadow-md">
+                      <h3 className="font-black text-white text-base sm:text-lg flex items-center gap-2">
+                        <Target className="w-6 h-6 text-[#6AC9F0]" />
+                        Công Thức Thao Tác Mắt Độc Quyền
+                      </h3>
+                      <p className="text-xs sm:text-sm text-sky-200 font-semibold mt-1">
+                        Quy định số lần nháy mắt và thời gian nhắm mắt để điều khiển ứng dụng:
                       </p>
                     </div>
-                  </div>
 
-                  {/* Quy tắc 3: Nháy 3 cái */}
-                  <div className="bg-gradient-to-r from-indigo-950/90 to-slate-900 border-2 border-indigo-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
-                      ⬅️
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <h4 className="font-black text-white text-sm sm:text-base">Nháy 3 Cái</h4>
-                        <span className="px-2.5 py-0.5 rounded-full bg-indigo-400 text-[#0F172A] font-black text-xs shadow-sm">
-                          SANG BÊN TRÁI
-                        </span>
+                    {/* Danh sách 5 Công Thức Chi Tiết */}
+                    <div className="space-y-2.5">
+                      {/* Quy tắc 1: Nháy 1 cái */}
+                      <div className="bg-gradient-to-r from-amber-950/90 to-slate-900 border-2 border-amber-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-amber-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
+                          👁️‍🗨️
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <h4 className="font-black text-white text-sm sm:text-base">Nháy 1 Cái</h4>
+                            <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-[#0F172A] font-black text-xs shadow-sm">
+                              CHỌN
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-100 font-medium mt-0.5">
+                            Nháy mắt 1 lần để <strong className="text-amber-300 font-bold">chọn nút bấm / kích hoạt tính năng</strong> tại điểm nhìn.
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-xs text-slate-100 font-medium mt-0.5">
-                        Nháy mắt 3 lần liên tiếp để <strong className="text-amber-300 font-bold">di chuyển sang bên trái</strong>.
-                      </p>
-                    </div>
-                  </div>
 
-                  {/* Quy tắc 4: Nhắm mắt 1.5 - 2s */}
-                  <div className="bg-gradient-to-r from-cyan-950/90 to-slate-900 border-2 border-cyan-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
-                    <div className="w-10 h-10 rounded-xl bg-cyan-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
-                      ⬇️
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <h4 className="font-black text-white text-sm sm:text-base">Nhắm Mắt 1.5s - 2.0s</h4>
-                        <span className="px-2.5 py-0.5 rounded-full bg-cyan-400 text-[#0F172A] font-black text-xs shadow-sm">
-                          XUỐNG DƯỚI
-                        </span>
+                      {/* Quy tắc 2: Nháy 2 cái */}
+                      <div className="bg-gradient-to-r from-purple-950/90 to-slate-900 border-2 border-purple-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-purple-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
+                          ➡️
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <h4 className="font-black text-white text-sm sm:text-base">Nháy 2 Cái</h4>
+                            <span className="px-2.5 py-0.5 rounded-full bg-purple-400 text-[#0F172A] font-black text-xs shadow-sm">
+                              SANG BÊN PHẢI
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-100 font-medium mt-0.5">
+                            Nháy mắt 2 lần liên tiếp để <strong className="text-amber-300 font-bold">di chuyển sang bên phải</strong>.
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-xs text-slate-100 font-medium mt-0.5">
-                        Nhắm mắt giữ trong khoảng 1.5s đến 2.0s để <strong className="text-amber-300 font-bold">di chuyển xuống dưới</strong> (cuộn xuống).
-                      </p>
-                    </div>
-                  </div>
 
-                  {/* Quy tắc 5: Nhắm mắt 2.5s trở lên */}
-                  <div className="bg-gradient-to-r from-sky-950/90 to-slate-900 border-2 border-sky-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
-                    <div className="w-10 h-10 rounded-xl bg-sky-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
-                      ⬆️
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <h4 className="font-black text-white text-sm sm:text-base">Nhắm Mắt Từ 2.5s Trở Lên</h4>
-                        <span className="px-2.5 py-0.5 rounded-full bg-sky-400 text-[#0F172A] font-black text-xs shadow-sm">
-                          LÊN TRÊN
-                        </span>
+                      {/* Quy tắc 3: Nháy 3 cái */}
+                      <div className="bg-gradient-to-r from-indigo-950/90 to-slate-900 border-2 border-indigo-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
+                          ⬅️
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <h4 className="font-black text-white text-sm sm:text-base">Nháy 3 Cái</h4>
+                            <span className="px-2.5 py-0.5 rounded-full bg-indigo-400 text-[#0F172A] font-black text-xs shadow-sm">
+                              SANG BÊN TRÁI
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-100 font-medium mt-0.5">
+                            Nháy mắt 3 lần liên tiếp để <strong className="text-amber-300 font-bold">di chuyển sang bên trái</strong>.
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-xs text-slate-100 font-medium mt-0.5">
-                        Nhắm mắt giữ từ 2.5s trở lên để <strong className="text-amber-300 font-bold">di chuyển lên trên</strong> (cuộn lên).
-                      </p>
+
+                      {/* Quy tắc 4: Nhắm mắt 1.5 - 2s */}
+                      <div className="bg-gradient-to-r from-cyan-950/90 to-slate-900 border-2 border-cyan-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-cyan-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
+                          ⬇️
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <h4 className="font-black text-white text-sm sm:text-base">Nhắm Mắt 1.5s - 2.0s</h4>
+                            <span className="px-2.5 py-0.5 rounded-full bg-cyan-400 text-[#0F172A] font-black text-xs shadow-sm">
+                              XUỐNG DƯỚI
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-100 font-medium mt-0.5">
+                            Nhắm mắt giữ trong khoảng 1.5s đến 2.0s để <strong className="text-amber-300 font-bold">di chuyển xuống dưới</strong> (cuộn xuống).
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Quy tắc 5: Nhắm mắt 2.5s trở lên */}
+                      <div className="bg-gradient-to-r from-sky-950/90 to-slate-900 border-2 border-sky-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-sky-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
+                          ⬆️
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <h4 className="font-black text-white text-sm sm:text-base">Nhắm Mắt Từ 2.5s Trở Lên</h4>
+                            <span className="px-2.5 py-0.5 rounded-full bg-sky-400 text-[#0F172A] font-black text-xs shadow-sm">
+                              LÊN TRÊN
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-100 font-medium mt-0.5">
+                            Nhắm mắt giữ từ 2.5s trở lên để <strong className="text-amber-300 font-bold">di chuyển lên trên</strong> (cuộn lên).
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  </>
+                )}
               </motion.div>
             )}
 
