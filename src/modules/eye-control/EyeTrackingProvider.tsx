@@ -57,7 +57,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     const savedSpeechVolume = localStorage.getItem('luckyDream.speechVolume');
     const savedSpeechRate = localStorage.getItem('luckyDream.speechRate');
 
-    const defaultSpeakerEnabled = savedSpeakerEnabled !== null ? savedSpeakerEnabled === 'true' : true;
+    const defaultSpeakerEnabled = savedSpeakerEnabled !== null ? savedSpeakerEnabled === 'true' : false;
     const defaultSpeechVolume = savedSpeechVolume !== null ? Math.max(0, Math.min(1, parseFloat(savedSpeechVolume))) : 1.0;
     const defaultSpeechRate = savedSpeechRate !== null ? Math.max(0.7, Math.min(1.5, parseFloat(savedSpeechRate))) : 1.0;
 

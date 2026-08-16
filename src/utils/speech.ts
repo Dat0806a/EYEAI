@@ -20,19 +20,19 @@ let currentSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 
 function loadInitialSpeechSettings(): SpeechSettings {
   if (typeof window === 'undefined') {
-    return { speakerEnabled: true, speechVolume: 1.0, speechRate: 1.0 };
+    return { speakerEnabled: false, speechVolume: 1.0, speechRate: 1.0 };
   }
   try {
     const savedEnabled = localStorage.getItem('luckyDream.speakerEnabled');
     const savedVolume = localStorage.getItem('luckyDream.speechVolume');
     const savedRate = localStorage.getItem('luckyDream.speechRate');
     return {
-      speakerEnabled: savedEnabled !== null ? savedEnabled === 'true' : true,
+      speakerEnabled: savedEnabled !== null ? savedEnabled === 'true' : false,
       speechVolume: savedVolume !== null ? Math.max(0, Math.min(1, parseFloat(savedVolume))) : 1.0,
       speechRate: savedRate !== null ? Math.max(0.7, Math.min(1.5, parseFloat(savedRate))) : 1.0,
     };
   } catch {
-    return { speakerEnabled: true, speechVolume: 1.0, speechRate: 1.0 };
+    return { speakerEnabled: false, speechVolume: 1.0, speechRate: 1.0 };
   }
 }
 
