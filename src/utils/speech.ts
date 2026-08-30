@@ -137,6 +137,7 @@ export function unlockAudio() {
       sharedAudioElement = new Audio();
       sharedAudioElement.setAttribute('playsinline', 'true');
       sharedAudioElement.setAttribute('webkit-playsinline', 'true');
+      sharedAudioElement.setAttribute('referrerpolicy', 'no-referrer');
     }
     if (sharedAudioElement) {
       sharedAudioElement.src = SILENT_WAV_BASE64;
@@ -288,14 +289,11 @@ function playOnlineTTS(
     const chunkText = chunks[chunkIndex];
     chunkIndex++;
 
-    const encoded = encodeURIComponent(chunkText);
-    const primaryUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encoded}`;
-    const secondaryUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Vietnamese%20Female&text=${encoded}`;
-
     if (!sharedAudioElement && typeof Audio !== 'undefined') {
       sharedAudioElement = new Audio();
       sharedAudioElement.setAttribute('playsinline', 'true');
       sharedAudioElement.setAttribute('webkit-playsinline', 'true');
+      sharedAudioElement.setAttribute('referrerpolicy', 'no-referrer');
     }
 
     if (!sharedAudioElement) {
@@ -308,47 +306,49 @@ function playOnlineTTS(
     targetAudio.playbackRate = options?.rate ?? currentSpeechSettings.speechRate;
     targetAudio.volume = options?.volume ?? currentSpeechSettings.speechVolume;
 
-    let trySecondary = false;
+    let attemptResolved = false;
 
-    const handleEnded = () => {
-      targetAudio.removeEventListener('ended', handleEnded);
-      targetAudio.removeEventListener('error', handleError);
-      playNextChunk();
-    };
+    const playAttempt = (url: string) => {
+      targetAudio.onended = null;
+      targetAudio.onerror = null;
 
-    const handleError = () => {
-      targetAudio.removeEventListener('ended', handleEnded);
-      targetAudio.removeEventListener('error', handleError);
+      const onEnded = () => {
+        if (attemptResolved) return;
+        attemptResolved = true;
+        targetAudio.onended = null;
+        targetAudio.onerror = null;
+        playNextChunk();
+      };
 
-      if (!trySecondary) {
-        trySecondary = true;
-        targetAudio.src = secondaryUrl;
-        targetAudio.addEventListener('ended', handleEnded, { once: true });
-        targetAudio.addEventListener('error', () => {
-          isPlayingAudio = false;
-          options?.onEnd?.();
-        }, { once: true });
-        targetAudio.play().catch(() => {
-          isPlayingAudio = false;
-          options?.onEnd?.();
-        });
-      } else {
+      const onError = () => {
+        if (attemptResolved) return;
+        attemptResolved = true;
+        targetAudio.onended = null;
+        targetAudio.onerror = null;
         isPlayingAudio = false;
         options?.onEnd?.();
+      };
+
+      targetAudio.onended = onEnded;
+      targetAudio.onerror = () => onError();
+
+      try {
+        targetAudio.pause();
+        targetAudio.src = url;
+        const playPromise = targetAudio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err: Error) => {
+            if (err?.name === 'AbortError') return;
+            onError();
+          });
+        }
+      } catch {
+        onError();
       }
     };
 
-    targetAudio.addEventListener('ended', handleEnded, { once: true });
-    targetAudio.addEventListener('error', handleError, { once: true });
-    targetAudio.src = primaryUrl;
-
-    const playPromise = targetAudio.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(err => {
-        console.warn('Audio play catch error, retrying secondary stream:', err);
-        handleError();
-      });
-    }
+    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encoded}`;
+    playAttempt(ttsUrl);
   };
 
   playNextChunk();
@@ -428,7 +428,7 @@ export function speakVietnamese(
         playOnlineTTS(cleanedText, options);
       };
 
-      // SAFETY TIMER: If Web Speech engine freezes on iOS Safari (onstart never fires after 350ms), fallback to Online TTS!
+      // SAFETY TIMER: If Web Speech engine freezes on iOS Safari (onstart never fires after 1500ms), fallback to Online TTS!
       currentSafetyTimer = setTimeout(() => {
         if (!hasStarted) {
           console.warn('SpeechSynthesis onstart timeout on iOS WebKit, switching to Online Audio TTS fallback');
@@ -440,7 +440,7 @@ export function speakVietnamese(
           activeUtterances = activeUtterances.filter(u => u !== utterance);
           playOnlineTTS(cleanedText, options);
         }
-      }, 350);
+      }, 1500);
 
       window.speechSynthesis.speak(utterance);
       return;

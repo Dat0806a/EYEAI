@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { CameraPreview } from '../modules/eye-control/CameraPreview';
-import { speakVietnamese } from '../utils/speech';
+import { speakVietnamese, isSpeechSupported } from '../utils/speech';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import { AccountType, ACCOUNT_TYPE_LABELS, getAccountTypeLabel } from '../types/account';
