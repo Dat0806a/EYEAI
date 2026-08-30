@@ -289,6 +289,8 @@ function playOnlineTTS(
     const chunkText = chunks[chunkIndex];
     chunkIndex++;
 
+    const encoded = encodeURIComponent(chunkText);
+
     if (!sharedAudioElement && typeof Audio !== 'undefined') {
       sharedAudioElement = new Audio();
       sharedAudioElement.setAttribute('playsinline', 'true');
