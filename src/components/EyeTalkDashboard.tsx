@@ -635,13 +635,29 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
         faceDetected: true
       }));
     } else {
-      // Check expiration of 1.5s window for 2nd blink
+      const BLINK_DECISION_WINDOW_MS = 650;
+
+      // Check expiration of window for 2nd blink:
+      // If user blinked 1 time and did NOT blink again within 650ms, trigger DOWN (Con trỏ xuống dưới)!
       if (blinkCountInGesture.current === 1) {
         const elapsedSinceFirstBlink = now - firstBlinkTime.current;
-        if (elapsedSinceFirstBlink > 1500) {
+        if (elapsedSinceFirstBlink >= BLINK_DECISION_WINDOW_MS && !isClosedNow && !isEyesClosed.current) {
           blinkCountInGesture.current = 0;
           firstBlinkTime.current = 0;
           lastBlinkEndTime.current = now;
+
+          cooldownTimer.current = 1200;
+          navigateCursor('DOWN');
+          speakVietnamese('Xuống');
+
+          setTrackingState(prev => ({
+            ...prev,
+            lastActionTriggered: `⬇️ XUỐNG (Chớp mắt 1 cái) - ${new Date().toLocaleTimeString()}`,
+            currentAction: 'DOWN',
+            actionProgress: 100,
+            faceDetected: true,
+            blinkCount: 1
+          }));
         }
       }
 
@@ -679,7 +695,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
               firstBlinkTime.current = now;
             } else if (blinkCountInGesture.current === 1) {
               const interval = now - firstBlinkTime.current;
-              if (interval <= 1500) {
+              if (interval <= BLINK_DECISION_WINDOW_MS + 250) {
                 // DOUBLE-BLINK SELECT!
                 blinkCountInGesture.current = 0;
                 firstBlinkTime.current = 0;
@@ -711,7 +727,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
         }
 
         if (blinkCountInGesture.current === 1) {
-          const remainingMs = Math.max(0, 1500 - (now - firstBlinkTime.current));
+          const remainingMs = Math.max(0, BLINK_DECISION_WINDOW_MS - (now - firstBlinkTime.current));
           const remainingSecs = (remainingMs / 1000).toFixed(1);
           setTrackingState(prev => ({
             ...prev,
@@ -719,8 +735,8 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
             directionH: 'CENTER',
             directionV: 'CENTER',
             currentAction: 'SELECT',
-            actionProgress: Math.min(100, Math.round((remainingMs / 1500) * 100)),
-            lastActionTriggered: `Đã chớp 1 cái (Chớp cái 2 trong ${remainingSecs}s để Chọn)...`,
+            actionProgress: Math.min(100, Math.round((remainingMs / BLINK_DECISION_WINDOW_MS) * 100)),
+            lastActionTriggered: `Đã chớp 1 cái (chờ ${remainingSecs}s để Xuống dưới ↓, hoặc chớp tiếp để Chọn 🎯)...`,
             blinkCount: 1,
             faceDetected: true
           }));

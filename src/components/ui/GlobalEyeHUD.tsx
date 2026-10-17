@@ -158,11 +158,11 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
                   </span>
                 ) : blinkCount === 1 ? (
                   <span className="text-[10px] font-black text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300 hidden sm:inline truncate animate-pulse shadow-xs">
-                    Chớp: 1 / 2 • Chớp cái 2 trong {(blinkWindowRemainingMs / 1000).toFixed(1)}s!
+                    Chớp 1: Xuống ↓ (còn {(blinkWindowRemainingMs / 1000).toFixed(1)}s, hoặc chớp tiếp để Chọn)
                   </span>
                 ) : (
                   <span className="text-[10px] font-bold text-[#3B4B68] hidden sm:inline truncate">
-                    Chớp mắt: 0 / 2 (Chớp 2 cái &lt;1.5s để Chọn)
+                    Chớp 1 cái: Xuống ↓ • Chớp 2 cái: Chọn 🎯
                   </span>
                 )}
               </div>
@@ -263,11 +263,11 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
                     ) : blinkCount === 2 ? (
                       <span className="text-emerald-700 font-black">Chớp 2/2: Đã Chọn 🎯</span>
                     ) : blinkCount === 1 ? (
-                      <span className="text-amber-800 font-black animate-pulse">Chớp 1/2 (còn {(blinkWindowRemainingMs / 1000).toFixed(1)}s)</span>
+                      <span className="text-amber-800 font-black animate-pulse">Chớp 1: Xuống ↓ (còn {(blinkWindowRemainingMs / 1000).toFixed(1)}s)</span>
                     ) : eyesClosed ? (
                       <span className="text-amber-800 font-black">Nhắm ({closedDuration.toFixed(1)}s)</span>
                     ) : (
-                      <span className="text-emerald-700 font-black">Chớp: 0/2 Chọn</span>
+                      <span className="text-emerald-700 font-black">Chớp 1: Xuống | 2: Chọn</span>
                     )}
                   </span>
                 </div>

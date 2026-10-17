@@ -509,13 +509,58 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     let actionTriggeredThisFrame: EyeAction = 'NONE';
     let actionProg = 0;
 
-    // Check expiration of 1.5s window for 2nd blink
+    const BLINK_DECISION_WINDOW_MS = 650; // 650ms window to decide between 1 blink (DOWN) and 2 blinks (SELECT)
+
+    // Check expiration of window for 2nd blink:
+    // If user blinked 1 time and did NOT blink again within 650ms -> Trigger DOWN (Xuống dưới)!
     if (blinkCountInGesture.current === 1) {
       const elapsedSinceFirstBlink = now - firstBlinkTime.current;
-      if (elapsedSinceFirstBlink > 1500) {
+      if (elapsedSinceFirstBlink >= BLINK_DECISION_WINDOW_MS && !isClosedNow && !isEyesClosed.current) {
         blinkCountInGesture.current = 0;
         firstBlinkTime.current = 0;
-        lastBlinkEndTime.current = now; // Add refractory buffer after window expires
+        lastBlinkEndTime.current = now;
+
+        const executed = dispatchAction('DOWN');
+        const nowTs = performance.now();
+        cooldownTimer.current = 1200; // 1.2s cooldown
+        actionTriggeredThisFrame = 'DOWN';
+        lastExecutedActionRef.current = 'DOWN';
+        lastExecutedTimestampRef.current = nowTs;
+        reArmedRef.current = false;
+
+        smoothGazeX.current = 0;
+        smoothGazeY.current = 0;
+        gazeDirState.current = 'CENTER';
+        currentGazeCandidate.current = 'CENTER';
+        gazeDwellStart.current = 0;
+        gazeFiredInThisLook.current = false;
+        centerStabilityStart.current = 0;
+
+        const updatedDown: EyeTrackingState = {
+          ...latestTelemetryRef.current,
+          rawEAR: parseFloat(metrics.avgEAR.toFixed(3)),
+          blinkThreshold: parseFloat(blinkThresh.toFixed(3)),
+          baselineEAR: parseFloat(openBaselineEAR.toFixed(3)),
+          lastActionTriggered: executed ? 'DOWN (Chớp mắt 1 cái - Xuống dưới)' : 'Không có phần tử phía dưới',
+          currentAction: 'DOWN',
+          lastExecutedAction: 'DOWN',
+          lastExecutedTimestamp: nowTs,
+          gazeDirection: 'CENTER',
+          directionH: 'CENTER',
+          directionV: 'CENTER',
+          gazeX: 0,
+          gazeY: 0,
+          rawGazeX: 0,
+          rawGazeY: 0,
+          blinkCount: 1,
+          blinkWindowRemainingMs: 0,
+          closedDuration: 0,
+          actionProgress: 100,
+          cooldownRemainingMs: 1200,
+          cooldownTotalMs: 1200,
+        };
+        latestTelemetryRef.current = updatedDown;
+        setTrackingState(updatedDown);
       }
     }
 
@@ -564,8 +609,8 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
           } else if (blinkCountInGesture.current === 1) {
             // Second blink registered!
             const interval = now - firstBlinkTime.current;
-            if (interval <= 1500) {
-              // Valid Double-Blink within 1.5s -> Trigger SELECT!
+            if (interval <= BLINK_DECISION_WINDOW_MS + 250) {
+              // Valid Double-Blink within window -> Trigger SELECT!
               blinkCountInGesture.current = 0;
               firstBlinkTime.current = 0;
               selectSuccessUntil.current = now + 1200; // Keep showing 2 / 2 on UI for 1.2s
@@ -613,7 +658,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
               latestTelemetryRef.current = updatedSelect;
               setTrackingState(updatedSelect);
             } else {
-              // Exceeded 1.5s: Start new cycle with this blink as #1
+              // Exceeded window: Start new cycle with this blink as #1
               blinkCountInGesture.current = 1;
               firstBlinkTime.current = now;
             }
@@ -626,18 +671,18 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Telemetry feedback during 1.5s waiting window for 2nd blink
+    // Telemetry feedback during waiting window for 2nd blink (or 1st blink auto-down)
     if (blinkCountInGesture.current === 1 && actionTriggeredThisFrame === 'NONE' && cooldownTimer.current <= 0) {
-      const remainingMs = Math.max(0, 1500 - (now - firstBlinkTime.current));
+      const remainingMs = Math.max(0, BLINK_DECISION_WINDOW_MS - (now - firstBlinkTime.current));
       const remainingSecs = (remainingMs / 1000).toFixed(1);
-      actionProg = Math.min(100, Math.round((remainingMs / 1500) * 100));
+      actionProg = Math.min(100, Math.round((remainingMs / BLINK_DECISION_WINDOW_MS) * 100));
 
       latestTelemetryRef.current = {
         ...latestTelemetryRef.current,
         blinkCount: 1,
         blinkWindowRemainingMs: Math.round(remainingMs),
         actionProgress: actionProg,
-        lastActionTriggered: `Đã chớp 1 cái (Chớp cái 2 trong ${remainingSecs}s để Chọn)...`,
+        lastActionTriggered: `Đã chớp 1 cái (chờ ${remainingSecs}s để Xuống dưới ↓, hoặc chớp tiếp để Chọn 🎯)...`,
       };
     }
 
@@ -742,7 +787,8 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         if (normH >= 1.0 && normH > normV * 1.05) {
           detectedDir = curGx > 0 ? 'RIGHT' : 'LEFT';
         } else if (normV >= 1.0 && normV > normH * 1.05) {
-          detectedDir = curGy > 0 ? 'DOWN' : 'UP';
+          // Downward gaze is disabled (replaced by 1 blink for Down)
+          detectedDir = curGy < 0 ? 'UP' : 'CENTER';
         } else {
           detectedDir = 'CENTER';
         }
@@ -751,7 +797,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       } else if (curGazeState === 'LEFT') {
         detectedDir = curGx > -relLeft ? 'CENTER' : 'LEFT';
       } else if (curGazeState === 'DOWN') {
-        detectedDir = curGy < relDown ? 'CENTER' : 'DOWN';
+        detectedDir = 'CENTER';
       } else if (curGazeState === 'UP') {
         detectedDir = curGy > -relUp ? 'CENTER' : 'UP';
       }
@@ -873,7 +919,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     const detectedDirH: 'LEFT' | 'RIGHT' | 'CENTER' =
       detectedDir === 'RIGHT' ? 'RIGHT' : detectedDir === 'LEFT' ? 'LEFT' : 'CENTER';
     const detectedDirV: 'UP' | 'DOWN' | 'CENTER' =
-      detectedDir === 'UP' ? 'UP' : detectedDir === 'DOWN' ? 'DOWN' : 'CENTER';
+      detectedDir === 'UP' ? 'UP' : 'CENTER';
     const curGx = smoothGazeX.current;
     const curGy = smoothGazeY.current;
 
@@ -1115,45 +1161,51 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         e.preventDefault();
         if (cooldownTimer.current <= 0) {
           if (e.key === ' ') {
-            // Space simulates Double Blink in simulator mode
+            // Space simulates Blink in simulator mode:
+            // 1 Space press (after 650ms) -> DOWN
+            // 2 Space presses (within 650ms) -> SELECT
             if (!spacePending) {
               spacePending = true;
               setTrackingState(prev => ({
                 ...prev,
                 blinkCount: 1,
-                blinkWindowRemainingMs: 1500,
-                lastActionTriggered: 'Đã chớp 1 cái (Bấm Space lần nữa trong 1.5s để Chọn)...',
+                blinkWindowRemainingMs: 650,
+                lastActionTriggered: 'Đã chớp 1 cái (chờ 0.6s để Xuống dưới ↓, hoặc bấm Space tiếp để Chọn 🎯)...',
               }));
               if (spaceTimer) clearTimeout(spaceTimer);
               spaceTimer = setTimeout(() => {
                 spacePending = false;
+                const executed = dispatchAction('DOWN');
+                const nowTs = performance.now();
+                cooldownTimer.current = 1200;
+                lastExecutedActionRef.current = 'DOWN';
+                lastExecutedTimestampRef.current = nowTs;
                 setTrackingState(prev => ({
                   ...prev,
                   blinkCount: 0,
                   blinkWindowRemainingMs: 0,
-                  lastActionTriggered: 'Hết 1.5s - Bộ đếm chớp mắt về 0',
+                  lastExecutedAction: 'DOWN',
+                  lastExecutedTimestamp: nowTs,
+                  lastActionTriggered: executed ? 'DOWN (Chớp 1 cái phím Space - Xuống dưới)' : 'Không có phần tử phía dưới',
+                  currentAction: 'DOWN',
+                  cooldownRemainingMs: 1200,
+                  cooldownTotalMs: 1200,
                 }));
-              }, 1500);
+              }, 650);
             } else {
-              // 2nd press within 1.5s -> Trigger SELECT!
+              // 2nd press within 650ms -> Trigger SELECT!
               if (spaceTimer) clearTimeout(spaceTimer);
               spacePending = false;
               selectSuccessUntil.current = performance.now() + 1200;
               const executed = dispatchAction('SELECT');
               const execTs = performance.now();
               cooldownTimer.current = ACTION_COOLDOWN_MS;
-              smoothGazeX.current = 0;
-              smoothGazeY.current = 0;
-              gazeDirState.current = 'CENTER';
-              currentGazeCandidate.current = 'CENTER';
-              reArmedRef.current = false;
-              centerStabilityStart.current = 0;
               lastExecutedActionRef.current = 'SELECT';
               lastExecutedTimestampRef.current = execTs;
 
               setTrackingState(prev => ({
                 ...prev,
-                lastActionTriggered: executed ? 'SELECT (Chớp 2 cái phím Space - Đã Chọn)' : 'Chưa có phần tử được chọn',
+                lastActionTriggered: executed ? 'SELECT (Chớp 2 cái phím Space - Đã Chọn 🎯)' : 'Chưa có phần tử được chọn',
                 currentAction: 'SELECT',
                 lastExecutedAction: 'SELECT',
                 lastExecutedTimestamp: execTs,

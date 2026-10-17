@@ -119,10 +119,10 @@ export const CameraHub = memo(function CameraHub({
   };
 
   const badgeConfig: { action: EyeAction; label: string; icon: React.ReactNode; keyHint: string }[] = [
-    { action: 'LEFT', label: 'SANG TRÁI', icon: <ArrowLeft className="w-4 h-4" />, keyHint: '←' },
-    { action: 'RIGHT', label: 'SANG PHẢI', icon: <ArrowRight className="w-4 h-4" />, keyHint: '→' },
-    { action: 'UP', label: 'LÊN', icon: <ArrowUp className="w-4 h-4" />, keyHint: '↑' },
-    { action: 'DOWN', label: 'XUỐNG', icon: <ArrowDown className="w-4 h-4" />, keyHint: '↓' },
+    { action: 'LEFT', label: 'SANG TRÁI', icon: <ArrowLeft className="w-4 h-4" />, keyHint: 'Liếc trái' },
+    { action: 'RIGHT', label: 'SANG PHẢI', icon: <ArrowRight className="w-4 h-4" />, keyHint: 'Liếc phải' },
+    { action: 'UP', label: 'LÊN', icon: <ArrowUp className="w-4 h-4" />, keyHint: 'Liếc lên' },
+    { action: 'DOWN', label: 'XUỐNG', icon: <ArrowDown className="w-4 h-4" />, keyHint: 'Chớp 1 cái' },
     { action: 'SELECT', label: 'CHỌN', icon: <Check className="w-4 h-4" />, keyHint: 'Chớp 2 cái' },
   ];
 
@@ -255,7 +255,7 @@ export const CameraHub = memo(function CameraHub({
 
             {blinkCount === 1 && (
               <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded-full border border-amber-400/30">
-                {(blinkWindowRemainingMs / 1000).toFixed(1)}s
+                {(blinkWindowRemainingMs / 1000).toFixed(1)}s ➔ Xuống ↓
               </span>
             )}
 
@@ -453,7 +453,7 @@ export const CameraHub = memo(function CameraHub({
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-black text-white">ĐẾM SỐ CÁI CHỚP MẮT (CHỌN)</span>
+                  <span className="text-xs font-black text-white">ĐẾM SỐ CÁI CHỚP MẮT (XUỐNG / CHỌN)</span>
                   <span
                     className={`text-[10px] font-black px-2 py-0.5 rounded-full border uppercase ${
                       blinkCount === 2
@@ -463,13 +463,13 @@ export const CameraHub = memo(function CameraHub({
                         : 'bg-slate-800 text-slate-400 border-slate-700'
                     }`}
                   >
-                    {blinkCount === 2 ? 'ĐÃ CHỌN 🎯' : blinkCount === 1 ? 'CHỜ CÁI THỨ 2' : 'CHỜ CHỚP MẮT'}
+                    {blinkCount === 2 ? 'ĐÃ CHỌN 🎯' : blinkCount === 1 ? '1: XUỐNG ↓ / 2: CHỌN 🎯' : 'CHỜ CHỚP MẮT'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 truncate mt-0.5">
-                  {blinkCount === 0 && 'Chớp mắt 2 cái trong vòng 1.5s là chọn • Sau mỗi 1.5s sẽ tự động về 0'}
-                  {blinkCount === 1 && `Đã chớp 1 cái! Chớp cái thứ 2 trong ${(blinkWindowRemainingMs / 1000).toFixed(1)}s để Chọn`}
-                  {blinkCount === 2 && 'Đã cộng dồn đủ 2 cái chớp: Thực hiện thao tác Chọn thành công!'}
+                  {blinkCount === 0 && 'Chớp 1 cái: Xuống dưới ↓ • Chớp 2 cái trong 0.6s: Chọn 🎯'}
+                  {blinkCount === 1 && `Đã chớp 1 cái! Chờ ${(blinkWindowRemainingMs / 1000).toFixed(1)}s để Xuống dưới ↓, hoặc chớp tiếp để Chọn 🎯`}
+                  {blinkCount === 2 && 'Đã chớp 2 cái: Thực hiện thao tác Chọn thành công!'}
                 </p>
               </div>
             </div>
