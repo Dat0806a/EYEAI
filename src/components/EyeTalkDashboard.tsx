@@ -81,11 +81,13 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
   const lastFrameTime = useRef<number>(Date.now());
   const cooldownTimer = useRef<number>(0);
 
-  // New state machine refs for blink and hold gestures:
+  // State machine refs for double-blink select:
   const isEyesClosed = useRef<boolean>(false);
   const closeStartTime = useRef<number | null>(null);
-  const blinkTimestamps = useRef<number[]>([]);
-  const jstBlinksTimeout = useRef<any>(null);
+  const blinkCountInGesture = useRef<number>(0);
+  const firstBlinkTime = useRef<number>(0);
+  const lastBlinkEndTime = useRef<number>(0);
+  const selectSuccessUntil = useRef<number>(0);
   
   // Tracking logs for debugging
   const [debugLog, setDebugLog] = useState<{ label: string; value: string | number }[]>([
@@ -190,15 +192,32 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
           }));
           break;
         case 'Enter':
+        case ' ': {
           e.preventDefault();
-          act = 'SELECT';
           triggerSelection();
+          const selectedItem = grid[focusedRowRef.current][focusedColRef.current];
+          const speakText = selectedItem ? `Chọn ${selectedItem.label}` : 'Chọn';
           setTrackingState(prev => ({
             ...prev,
             currentAction: 'SELECT',
-            lastActionTriggered: 'SELECT (Phím Enter)'
+            lastActionTriggered: '🎯 CHỌN (Phím Space/Enter)'
           }));
+          speakVietnamese(speakText);
           break;
+        }
+        case 'Escape': {
+          e.preventDefault();
+          setTrackingState(prev => ({
+            ...prev,
+            currentAction: 'ESCAPE',
+            lastActionTriggered: '↩️ HỦY THAO TÁC (Phím Escape)'
+          }));
+          speakVietnamese('Hủy thao tác');
+          if (onBackToHome) {
+            onBackToHome();
+          }
+          break;
+        }
         default:
           return;
       }
@@ -373,9 +392,6 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
   useEffect(() => {
     return () => {
       stopTrackingLoop();
-      if (jstBlinksTimeout.current) {
-        clearTimeout(jstBlinksTimeout.current);
-      }
     };
   }, []);
 
@@ -596,10 +612,13 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
       if (cooldownTimer.current < 0) cooldownTimer.current = 0;
     }
 
-    const isClosedNow = metrics.avgEAR < calibration.blinkThreshold;
-    let actionDetected: EyeAction = 'NONE';
-    let actionProg = 0;
-    let dirV: 'CENTER' | 'UP' | 'DOWN' = 'CENTER';
+    // Robust human baseline EAR (typically 0.26 - 0.38 when open)
+    const openBaselineEAR = Math.max(0.22, Math.min(0.42, calibration.neutralEAR || 0.29));
+    // When a human blinks naturally, EAR drops by ~22-38% from open baseline.
+    const dynamicBlinkThresh = Math.max(0.16, Math.min(0.28, openBaselineEAR * 0.78));
+    const blinkThresh = calibration.blinkThreshold ? Math.max(0.16, Math.min(0.29, calibration.blinkThreshold)) : dynamicBlinkThresh;
+    const currentThresh = isEyesClosed.current ? blinkThresh + 0.015 : blinkThresh;
+    const isClosedNow = metrics.avgEAR < currentThresh || (metrics.leftEAR < currentThresh && metrics.rightEAR < currentThresh);
 
     if (cooldownTimer.current > 0) {
       // While in cooldown, keep tracking variables synchronized but ignore triggers
@@ -616,179 +635,24 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
         faceDetected: true
       }));
     } else {
+      // Check expiration of 1.5s window for 2nd blink
+      if (blinkCountInGesture.current === 1) {
+        const elapsedSinceFirstBlink = now - firstBlinkTime.current;
+        if (elapsedSinceFirstBlink > 1500) {
+          blinkCountInGesture.current = 0;
+          firstBlinkTime.current = 0;
+          lastBlinkEndTime.current = now;
+        }
+      }
+
       if (isClosedNow) {
         if (!isEyesClosed.current) {
           isEyesClosed.current = true;
           closeStartTime.current = now;
         }
+        const holdMs = now - (closeStartTime.current || now);
+        const curSecs = (holdMs / 1000).toFixed(1);
 
-        const holdDuration = now - (closeStartTime.current || now);
-
-        if (holdDuration >= 450 && holdDuration <= 1300) {
-          actionDetected = 'SELECT';
-          // Scale progress targeting roughly 800ms to 1000ms
-          actionProg = Math.min(100, Math.round(((holdDuration - 450) / 450) * 100));
-        } else if (holdDuration > 1300 && holdDuration <= 2200) {
-          actionDetected = 'DOWN';
-          dirV = 'DOWN';
-          // Scale progress targeting roughly 1500ms to 2000ms
-          actionProg = Math.min(100, Math.round(((holdDuration - 1300) / 600) * 100));
-        } else if (holdDuration > 2200) {
-          actionDetected = 'UP';
-          dirV = 'UP';
-          // Scale progress targeting roughly 2500ms
-          actionProg = Math.min(100, Math.round(((holdDuration - 2200) / 400) * 100));
-        }
-
-        setTrackingState(prev => ({
-          ...prev,
-          rawEAR: metrics.avgEAR,
-          directionH: 'CENTER',
-          directionV: dirV,
-          currentAction: actionDetected,
-          actionProgress: actionProg,
-          faceDetected: true
-        }));
-      } else {
-        // Eyes are currently OPEN
-        if (isEyesClosed.current) {
-          // Closed -> Open transition detected!
-          isEyesClosed.current = false;
-          const finalDuration = now - (closeStartTime.current || now);
-          closeStartTime.current = null;
-
-          if (finalDuration >= 50 && finalDuration < 450) {
-            // Short blink detected
-            const len = blinkTimestamps.current.length;
-            const lastBlink = len > 0 ? blinkTimestamps.current[len - 1] : 0;
-            if (lastBlink && (now - lastBlink < 250)) {
-              // Ignore high frequency jitter
-            } else {
-              if (jstBlinksTimeout.current) {
-                clearTimeout(jstBlinksTimeout.current);
-              }
-
-              blinkTimestamps.current.push(now);
-              // Maintain timestamps up to 3.5s
-              blinkTimestamps.current = blinkTimestamps.current.filter(t => now - t <= 3500);
-
-              const blinksCount = blinkTimestamps.current.length;
-              if (blinksCount === 1) {
-                // Wait to see if a second blink occurs. If not, trigger selection!
-                jstBlinksTimeout.current = setTimeout(() => {
-                  cooldownTimer.current = 600; // safe cooldown
-                  triggerSelection();
-                  
-                  const selectedItem = grid[focusedRowRef.current][focusedColRef.current];
-                  const speakText = selectedItem ? `Chọn ${selectedItem.label}` : 'Chọn';
-
-                  setTrackingState(prev => ({
-                    ...prev,
-                    lastActionTriggered: `🎯 CHỌN (Nháy 1 lần) - ${new Date().toLocaleTimeString()}`,
-                    currentAction: 'NONE',
-                    actionProgress: 0
-                  }));
-                  speakVietnamese(speakText);
-                  
-                  blinkTimestamps.current = [];
-                }, 1000); // 1 second wait window
-              } else if (blinksCount === 2) {
-                // Check if the 2 blinks occurred within 1.5s
-                const holdsWithin1_5s = (blinkTimestamps.current[1] - blinkTimestamps.current[0]) <= 1500;
-                if (holdsWithin1_5s) {
-                  // Wait to see if there is a 3rd blink coming
-                  jstBlinksTimeout.current = setTimeout(() => {
-                    cooldownTimer.current = 600; // 0.6s safe cooldown
-                    navigateCursor('NEXT');
-                    setTrackingState(prev => ({
-                      ...prev,
-                      lastActionTriggered: `➡️ PHẢI (Nháy 2 lần trong 1.5s) - ${new Date().toLocaleTimeString()}`,
-                      currentAction: 'NONE',
-                      actionProgress: 0
-                    }));
-                    speakVietnamese('Sang phải');
-                    blinkTimestamps.current = [];
-                  }, 1100);
-                } else {
-                  // The 2 blinks were too far apart. Treat the second blink as the start of a new sequence
-                  blinkTimestamps.current = [now];
-                  jstBlinksTimeout.current = setTimeout(() => {
-                    cooldownTimer.current = 600; // safe cooldown
-                    triggerSelection();
-                    
-                    const selectedItem = grid[focusedRowRef.current][focusedColRef.current];
-                    const speakText = selectedItem ? `Chọn ${selectedItem.label}` : 'Chọn';
-
-                    setTrackingState(prev => ({
-                      ...prev,
-                      lastActionTriggered: `🎯 CHỌN (Nháy 1 lần) - ${new Date().toLocaleTimeString()}`,
-                      currentAction: 'NONE',
-                      actionProgress: 0
-                    }));
-                    speakVietnamese(speakText);
-
-                    blinkTimestamps.current = [];
-                  }, 1000);
-                }
-              } else if (blinksCount >= 3) {
-                // Check if the last 3 blinks are within 3.5s
-                const currentLen = blinkTimestamps.current.length;
-                const holdsWithin3_5s = (blinkTimestamps.current[currentLen - 1] - blinkTimestamps.current[currentLen - 3]) <= 3500;
-                if (holdsWithin3_5s) {
-                  cooldownTimer.current = 600; // 0.6s safe cooldown
-                  navigateCursor('BACK');
-                  setTrackingState(prev => ({
-                    ...prev,
-                    lastActionTriggered: `⬅️ TRÁI (Nháy 3 lần trong 3.5s) - ${new Date().toLocaleTimeString()}`,
-                    currentAction: 'NONE',
-                    actionProgress: 0
-                  }));
-                  speakVietnamese('Sang trái');
-                }
-                blinkTimestamps.current = [];
-              }
-            }
-          } else if (finalDuration >= 800 && finalDuration <= 1300) {
-            // Chọn (SELECT) -> Nhắm giữ 0.8s - 1s rồi thả
-            cooldownTimer.current = 500;
-            triggerSelection();
-            
-            const selectedItem = grid[focusedRowRef.current][focusedColRef.current];
-            const speakText = selectedItem ? `Chọn ${selectedItem.label}` : 'Chọn';
-
-            setTrackingState(prev => ({
-              ...prev,
-              lastActionTriggered: `🎯 CHỌN (Nhắm giữ 0.8-1s) - ${new Date().toLocaleTimeString()}`,
-              currentAction: 'NONE',
-              actionProgress: 0
-            }));
-            speakVietnamese(speakText);
-          } else if (finalDuration >= 1400 && finalDuration <= 2200) {
-            // Xuống (DOWN) -> Nhắm giữ 1.5s - 2s rồi thả
-            cooldownTimer.current = 500;
-            navigateCursor('DOWN');
-            setTrackingState(prev => ({
-              ...prev,
-              lastActionTriggered: `⬇️ XUỐNG (Nhắm giữ 1.5-2s) - ${new Date().toLocaleTimeString()}`,
-              currentAction: 'NONE',
-              actionProgress: 0
-            }));
-            speakVietnamese('Xuống');
-          } else if (finalDuration >= 2300) {
-            // Lên (UP) -> Nhắm giữ 2.5s rồi thả
-            cooldownTimer.current = 500;
-            navigateCursor('UP');
-            setTrackingState(prev => ({
-              ...prev,
-              lastActionTriggered: `⬆️ LÊN (Nhắm giữ 2.5s) - ${new Date().toLocaleTimeString()}`,
-              currentAction: 'NONE',
-              actionProgress: 0
-            }));
-            speakVietnamese('Lên');
-          }
-        }
-
-        // Keep standard look state
         setTrackingState(prev => ({
           ...prev,
           rawEAR: metrics.avgEAR,
@@ -796,22 +660,94 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
           directionV: 'CENTER',
           currentAction: 'NONE',
           actionProgress: 0,
-          faceDetected: true
+          faceDetected: true,
+          lastActionTriggered: `Đang nhắm mắt (${curSecs}s)...`
         }));
+      } else {
+        // Eyes are OPEN in this frame
+        if (isEyesClosed.current) {
+          const blinkDuration = now - (closeStartTime.current || now);
+          isEyesClosed.current = false;
+          closeStartTime.current = null;
+          lastBlinkEndTime.current = now;
+
+          const isValidBlink = blinkDuration >= 20 && blinkDuration <= 800;
+
+          if (isValidBlink && cooldownTimer.current <= 0) {
+            if (blinkCountInGesture.current === 0) {
+              blinkCountInGesture.current = 1;
+              firstBlinkTime.current = now;
+            } else if (blinkCountInGesture.current === 1) {
+              const interval = now - firstBlinkTime.current;
+              if (interval <= 1500) {
+                // DOUBLE-BLINK SELECT!
+                blinkCountInGesture.current = 0;
+                firstBlinkTime.current = 0;
+                selectSuccessUntil.current = now + 1200;
+                cooldownTimer.current = 2500;
+                triggerSelection();
+
+                const selectedItem = grid[focusedRowRef.current]?.[focusedColRef.current];
+                const speakText = selectedItem ? `Chọn ${selectedItem.label}` : 'Chọn';
+
+                setTrackingState(prev => ({
+                  ...prev,
+                  lastActionTriggered: `🎯 CHỌN (Chớp mắt 2 cái) - ${new Date().toLocaleTimeString()}`,
+                  currentAction: 'SELECT',
+                  actionProgress: 100,
+                  faceDetected: true,
+                  blinkCount: 2
+                }));
+                speakVietnamese(speakText);
+              } else {
+                blinkCountInGesture.current = 1;
+                firstBlinkTime.current = now;
+              }
+            }
+          } else if (blinkDuration > 800) {
+            blinkCountInGesture.current = 0;
+            firstBlinkTime.current = 0;
+          }
+        }
+
+        if (blinkCountInGesture.current === 1) {
+          const remainingMs = Math.max(0, 1500 - (now - firstBlinkTime.current));
+          const remainingSecs = (remainingMs / 1000).toFixed(1);
+          setTrackingState(prev => ({
+            ...prev,
+            rawEAR: metrics.avgEAR,
+            directionH: 'CENTER',
+            directionV: 'CENTER',
+            currentAction: 'SELECT',
+            actionProgress: Math.min(100, Math.round((remainingMs / 1500) * 100)),
+            lastActionTriggered: `Đã chớp 1 cái (Chớp cái 2 trong ${remainingSecs}s để Chọn)...`,
+            blinkCount: 1,
+            faceDetected: true
+          }));
+        } else {
+          setTrackingState(prev => ({
+            ...prev,
+            rawEAR: metrics.avgEAR,
+            directionH: 'CENTER',
+            directionV: 'CENTER',
+            currentAction: 'NONE',
+            actionProgress: 0,
+            blinkCount: now < selectSuccessUntil.current ? 2 : 0,
+            faceDetected: true
+          }));
+        }
       }
     }
 
     // Dynamically update debugging telemetry on panel
     const curHoldSecs = isEyesClosed.current && closeStartTime.current ? ((now - closeStartTime.current) / 1000).toFixed(2) : 0;
+    const remainingSecs = blinkCountInGesture.current === 1 ? Math.max(0, 1.5 - ((now - firstBlinkTime.current) / 1000)).toFixed(1) : '0';
     setDebugLog([
       { label: 'Chỉ số EAR trung bình (Độ mở mắt)', value: metrics.avgEAR.toFixed(3) },
-      { label: 'Ngưỡng Nhắm mắt (Calibrated)', value: calibration.blinkThreshold.toFixed(3) },
-      { label: 'Thời gian Nhắm mắt hiện tại', value: `${curHoldSecs} giây` },
-      { label: 'Số phát phát hiện Nháy mắt liên tiếp', value: `${blinkTimestamps.current.length} lần` },
+      { label: 'Ngưỡng Chớp mắt (Blink Threshold)', value: blinkThresh.toFixed(3) },
+      { label: 'Bộ đếm số cái Chớp mắt', value: `${now < selectSuccessUntil.current ? 2 : blinkCountInGesture.current} / 2 ${blinkCountInGesture.current === 1 ? `(còn ${remainingSecs}s)` : ''}` },
       { label: 'Thời gian Phục hồi (Cooldown)', value: `${(cooldownTimer.current / 1000).toFixed(2)}s` },
-      { label: 'Cử chỉ Chọn (SELECT)', value: 'Nháy mắt 1 lần' },
-      { label: 'Khoảng nhắm giữ Xuống (DOWN)', value: '1.5 giây – 2.0 giây' },
-      { label: 'Khoảng nhắm giữ Lên (UP)', value: '>= 2.5 giây' }
+      { label: 'Cử chỉ Chọn (SELECT)', value: 'Chớp mắt 2 cái trong 1.5 giây' },
     ]);
   };
 
@@ -1045,9 +981,9 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
                 </p>
               </div>
               <div className="p-2 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] text-slate-400 uppercase font-bold">Lượt Nháy (3.5s)</p>
+                <p className="text-[10px] text-slate-400 uppercase font-bold">Thao tác Chọn</p>
                 <p className="text-sm font-extrabold text-indigo-600 dark:text-indigo-400 mt-1">
-                  ⚡ {blinkTimestamps.current.length} lần
+                  🎯 Nhắm 2.0s
                 </p>
               </div>
               <div className="p-2 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-800">
@@ -1098,7 +1034,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
               </div>
             ) : (
               <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl text-center text-slate-500 dark:text-slate-400 flex items-center justify-center h-[74px]">
-                <p className="text-xs">Đang chờ cử chỉ mắt từ bạn... (Nháy 1 lần = Chọn, Nháy 2 lần = Phải, Nháy 3 lần = Trái, Nhắm mắt giữ = Lên/Xuống)</p>
+                <p className="text-xs">Đang chờ cử chỉ mắt từ bạn... (Nháy 2 lần &lt;1.5s = Chọn, Liếc Lên/Xuống/Trái/Phải để chuyển ô)</p>
               </div>
             )}
 
@@ -1354,11 +1290,9 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
                 💡 Cẩm nang cử chỉ Mắt (Nhìn thẳng màn hình):
               </span>
               <div className="flex flex-wrap gap-x-5 gap-y-1.5 leading-relaxed">
-                <span className="flex items-center gap-1">➡️ <strong className="text-slate-700 dark:text-slate-200">Phải:</strong> Nháy mắt 2 lần trong 1.5 giây để di chuyển sang phải</span>
-                <span className="flex items-center gap-1">⬅️ <strong className="text-slate-700 dark:text-slate-200">Trái:</strong> Nháy mắt 3 lần trong 3.5 giây để di chuyển sang trái</span>
-                <span className="flex items-center gap-1">🎯 <strong className="text-slate-700 dark:text-slate-200">Chọn:</strong> Nháy mắt 1 lần để Chọn phím</span>
-                <span className="flex items-center gap-1">👇 <strong className="text-slate-700 dark:text-slate-200">Xuống:</strong> Nhắm mắt 1.5–2 giây rồi mở ra để xuống hàng dưới</span>
-                <span className="flex items-center gap-1">👆 <strong className="text-slate-700 dark:text-slate-200">Lên:</strong> Nhắm mắt từ 2.5 giây trở lên rồi mở ra để lên hàng trên</span>
+                <span className="flex items-center gap-1">🎯 <strong className="text-slate-700 dark:text-slate-200">Chọn:</strong> Nháy mắt 2 lần trong vòng 1.5 giây để Chọn</span>
+                <span className="flex items-center gap-1">👀 <strong className="text-slate-700 dark:text-slate-200">Điều hướng:</strong> Liếc Lên / Xuống / Trái / Phải để di chuyển ô chọn</span>
+                <span className="flex items-center gap-1">⏱️ <strong className="text-slate-700 dark:text-slate-200">Thời gian nghỉ:</strong> 2.5 giây giữa các thao tác</span>
               </div>
             </div>
             

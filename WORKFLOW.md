@@ -43,11 +43,9 @@ flowchart TB
 
     subgraph GestureFSM["3. GESTURE RECOGNITION FSM"]
         FSM{"Máy Trạng Thái Cử Chỉ"}
-        BLINK_1["1 Nháy -> SELECT"]
-        BLINK_2["2 Nháy -> NEXT (Phải)"]
-        BLINK_3["3 Nháy -> BACK (Trái)"]
-        DWELL_DOWN["Nhắm 1.5s-2.0s -> DOWN (Dưới)"]
-        DWELL_UP["Nhắm > 2.5s -> UP (Trên)"]
+        BLINK_1["1 Nháy -> SELECT (Chọn)"]
+        BLINK_2["2 Nháy (trong 1.5s) -> HỦY THAO TÁC / QUAY LẠI (ESCAPE)"]
+        GAZE_DIR["Liếc Mắt 4 Hướng -> DI CHUYỂN TIÊU ĐIỂM (LEFT/RIGHT/UP/DOWN)"]
         SOS_TRIGGER["Nhắm 8.0s -> SOS ALARM"]
     end
 
@@ -196,19 +194,16 @@ flowchart TD
     Khởi động Time-Window Timer (1.5s)"]
 
     ADD_BLINK --> CHECK_COUNT{"blinkCount hiện tại?"}
-    CHECK_COUNT -- "3 Lần (trong 3.5s)" --> EXEC_BACK["Thực thi Lệnh: BACK (Di chuyển Trái)
+    CHECK_COUNT -- "2 Lần (trong 1.5s)" --> EXEC_ESCAPE["Thực thi Lệnh: ESCAPE / DOUBLE_BLINK (Hủy thao tác)
     Reset blinkCount = 0"]
-    CHECK_COUNT -- "2 Lần" --> WAIT_2ND["Chờ xem có nháy lần 3 không..."]
-    CHECK_COUNT -- "1 Lần" --> WAIT_1ST["Chờ xem có nháy lần 2 không..."]
+    CHECK_COUNT -- "1 Lần" --> WAIT_1ST["Chờ xem có nháy lần 2 không (cửa sổ 1.5s)..."]
 
-    CHECK_TIMEOUT -- Có (Timeout 1.5s) --> FLUSH_BLINKS{"Số nháy chưa xử lý?"}
-    FLUSH_BLINKS -- "2 Lần" --> EXEC_NEXT["Thực thi Lệnh: NEXT (Di chuyển Phải)
-    Reset blinkCount = 0"]
+    CHECK_TIMEOUT -- Có (Hết 1.5s không có lần 2) --> FLUSH_BLINKS{"Số nháy chưa xử lý?"}
     FLUSH_BLINKS -- "1 Lần" --> EXEC_SELECT["Thực thi Lệnh: SELECT (Nhấn / Chọn)
     Reset blinkCount = 0"]
     FLUSH_BLINKS -- "0 Lần" --> RESET_STATE["Giữ trạng thái tĩnh"]
 
-    EXEC_UP & EXEC_DOWN & EXEC_BACK & EXEC_NEXT & EXEC_SELECT --> DISPATCH_NAV["Gửi Lệnh tới EyeNavigationProvider"]
+    EXEC_ESCAPE & EXEC_SELECT --> DISPATCH_NAV["Gửi Lệnh tới EyeNavigationProvider"]
     DISPATCH_NAV --> END_FRAME
     TRIGGER_SOS --> END_FRAME
     RESET_STATE --> END_FRAME

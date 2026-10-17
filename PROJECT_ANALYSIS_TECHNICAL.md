@@ -171,8 +171,7 @@ Dựa vào số lần nháy mắt và thời gian nhắm mắt giữ liên tục
 [Mắt Nháy Nhanh: Mở -> Đóng -> Mở]
         │
         ├──► 1 Lần Nháy ──────────────► Kích hoạt lệnh SELECT (Chọn)
-        ├──► 2 Lần Nháy (trong 1.5s) ──► Kích hoạt lệnh NEXT (Di chuyển Phải)
-        └──► 3 Lần Nháy (trong 3.5s) ──► Kích hoạt lệnh BACK (Di chuyển Trái)
+        └──► 2 Lần Nháy (trong 1.5s) ──► Kích hoạt lệnh HỦY THAO TÁC / QUAY LẠI (ESCAPE)
 ```
 
 ---

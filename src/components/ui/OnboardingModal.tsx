@@ -337,92 +337,38 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
 
                     {/* Danh sách 5 Công Thức Chi Tiết */}
                     <div className="space-y-2.5">
-                      {/* Quy tắc 1: Nháy 1 cái */}
+                      {/* Quy tắc 1: Nháy mắt 2 lần trong 1.5s để chọn */}
                       <div className="bg-gradient-to-r from-amber-950/90 to-slate-900 border-2 border-amber-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
                         <div className="w-10 h-10 rounded-xl bg-amber-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
                           👁️‍🗨️
                         </div>
                         <div className="flex-1">
                           <div className="flex items-center justify-between gap-2">
-                            <h4 className="font-black text-white text-sm sm:text-base">Nháy 1 Cái</h4>
+                            <h4 className="font-black text-white text-sm sm:text-base">Nháy Mắt 2 Lần (&lt; 1.5 Giây)</h4>
                             <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-[#0F172A] font-black text-xs shadow-sm">
                               CHỌN
                             </span>
                           </div>
                           <p className="text-xs text-slate-100 font-medium mt-0.5">
-                            Nháy mắt 1 lần để <strong className="text-amber-300 font-bold">chọn nút bấm / kích hoạt tính năng</strong> tại điểm nhìn.
+                            Nháy mắt liên tiếp 2 lần trong vòng 1.5 giây để <strong className="text-amber-300 font-bold">chọn ô / kích hoạt tính năng</strong> tại điểm nhìn. Chớp mắt 1 lần bình thường sẽ không kích hoạt nhầm.
                           </p>
                         </div>
                       </div>
 
-                      {/* Quy tắc 2: Nháy 2 cái */}
-                      <div className="bg-gradient-to-r from-purple-950/90 to-slate-900 border-2 border-purple-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
-                        <div className="w-10 h-10 rounded-xl bg-purple-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
-                          ➡️
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <h4 className="font-black text-white text-sm sm:text-base">Nháy 2 Cái</h4>
-                            <span className="px-2.5 py-0.5 rounded-full bg-purple-400 text-[#0F172A] font-black text-xs shadow-sm">
-                              SANG BÊN PHẢI
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-100 font-medium mt-0.5">
-                            Nháy mắt 2 lần liên tiếp để <strong className="text-amber-300 font-bold">di chuyển sang bên phải</strong>.
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Quy tắc 3: Nháy 3 cái */}
+                      {/* Quy tắc 3: Liếc mắt 4 hướng */}
                       <div className="bg-gradient-to-r from-indigo-950/90 to-slate-900 border-2 border-indigo-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
                         <div className="w-10 h-10 rounded-xl bg-indigo-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
-                          ⬅️
+                          👀
                         </div>
                         <div className="flex-1">
                           <div className="flex items-center justify-between gap-2">
-                            <h4 className="font-black text-white text-sm sm:text-base">Nháy 3 Cái</h4>
+                            <h4 className="font-black text-white text-sm sm:text-base">Liếc Mắt 4 Hướng</h4>
                             <span className="px-2.5 py-0.5 rounded-full bg-indigo-400 text-[#0F172A] font-black text-xs shadow-sm">
-                              SANG BÊN TRÁI
+                              DI CHUYỂN
                             </span>
                           </div>
                           <p className="text-xs text-slate-100 font-medium mt-0.5">
-                            Nháy mắt 3 lần liên tiếp để <strong className="text-amber-300 font-bold">di chuyển sang bên trái</strong>.
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Quy tắc 4: Nhắm mắt 1.5 - 2s */}
-                      <div className="bg-gradient-to-r from-cyan-950/90 to-slate-900 border-2 border-cyan-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
-                        <div className="w-10 h-10 rounded-xl bg-cyan-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
-                          ⬇️
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <h4 className="font-black text-white text-sm sm:text-base">Nhắm Mắt 1.5s - 2.0s</h4>
-                            <span className="px-2.5 py-0.5 rounded-full bg-cyan-400 text-[#0F172A] font-black text-xs shadow-sm">
-                              XUỐNG DƯỚI
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-100 font-medium mt-0.5">
-                            Nhắm mắt giữ trong khoảng 1.5s đến 2.0s để <strong className="text-amber-300 font-bold">di chuyển xuống dưới</strong> (cuộn xuống).
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Quy tắc 5: Nhắm mắt 2.5s trở lên */}
-                      <div className="bg-gradient-to-r from-sky-950/90 to-slate-900 border-2 border-sky-400/50 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
-                        <div className="w-10 h-10 rounded-xl bg-sky-400 text-[#0F172A] font-black flex items-center justify-center text-lg flex-shrink-0 shadow-md">
-                          ⬆️
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <h4 className="font-black text-white text-sm sm:text-base">Nhắm Mắt Từ 2.5s Trở Lên</h4>
-                            <span className="px-2.5 py-0.5 rounded-full bg-sky-400 text-[#0F172A] font-black text-xs shadow-sm">
-                              LÊN TRÊN
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-100 font-medium mt-0.5">
-                            Nhắm mắt giữ từ 2.5s trở lên để <strong className="text-amber-300 font-bold">di chuyển lên trên</strong> (cuộn lên).
+                            Liếc mắt Trái / Phải / Lên / Xuống để <strong className="text-amber-300 font-bold">di chuyển con trỏ tiêu điểm</strong> qua các ô.
                           </p>
                         </div>
                       </div>

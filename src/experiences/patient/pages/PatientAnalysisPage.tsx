@@ -183,7 +183,7 @@ export function PatientAnalysisPage({
                     }
                     status={
                       res.status === 'LOW' || res.status === 'HIGH'
-                        ? 'error'
+                        ? 'warning'
                         : res.status === 'NORMAL'
                         ? 'active'
                         : 'idle'

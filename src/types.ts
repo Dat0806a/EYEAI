@@ -8,7 +8,17 @@ export interface GridItem {
   colorClass?: string; // custom Tailwind style for visual hierarchy
 }
 
-export type EyeAction = 'NEXT' | 'BACK' | 'UP' | 'DOWN' | 'SELECT' | 'NONE';
+export type EyeAction =
+  | 'NEXT'
+  | 'BACK'
+  | 'UP'
+  | 'DOWN'
+  | 'RIGHT'
+  | 'LEFT'
+  | 'SELECT'
+  | 'ESCAPE'
+  | 'DOUBLE_BLINK'
+  | 'NONE';
 
 export interface EyeCalibrationData {
   neutralEAR: number;

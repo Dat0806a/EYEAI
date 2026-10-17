@@ -132,6 +132,19 @@ function AppContent() {
     }
   }, [isAuthenticated, authLoading]);
 
+  // Global DOUBLE BLINK escape / task cancellation listener
+  useEffect(() => {
+    const handleEyeEscape = () => {
+      const homeRoute = profile?.account_type === 'patient' ? 'patient-home' : 'home';
+      if (currentRoute !== homeRoute && currentRoute !== 'auth' && currentRoute !== 'login' && currentRoute !== 'register') {
+        navigateTo(homeRoute);
+      }
+    };
+
+    window.addEventListener('eyeai:escape', handleEyeEscape);
+    return () => window.removeEventListener('eyeai:escape', handleEyeEscape);
+  }, [currentRoute, profile?.account_type]);
+
   // EXPERIENCE ROUTER ENGINE: Handle account_type switching automatically
   useEffect(() => {
     if (!isAuthenticated || authLoading) return;

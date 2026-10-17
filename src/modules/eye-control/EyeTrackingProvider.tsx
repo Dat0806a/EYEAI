@@ -1,6 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode, useCallback, useMemo } from 'react';
-import { EyeAction, EyeCalibrationData, EyeTrackingState, EyeControlSettings } from './types';
-import { analyzeEyes, EYE_INDICES } from './eyeTracker';
+import {
+  EyeAction,
+  GazeDirection,
+  CalibrationStep,
+  EyeCalibrationData,
+  EyeTrackingState,
+  EyeControlSettings,
+  OverlayDisplaySettings,
+} from './types';
+import { analyzeEyes, Point } from './eyeTracker';
 import { speakVietnamese, updateSpeechSettings } from '../../utils/speech';
 
 export interface EyeTrackingSettingsContextType {
@@ -21,11 +29,20 @@ export interface EyeTrackingSettingsContextType {
   setSpeechRate: (rate: number) => void;
   toggleCamera: () => Promise<void>;
   startCalibration: () => void;
+  start5PointCalibration: () => void;
+  cancelCalibration: () => void;
+  resetCalibration: () => void;
+  reZeroCenter: () => void;
   calibrationStage: 'idle' | 'countdown' | 'collecting' | 'completed';
+  calibrationStep: CalibrationStep;
   calibrationProgress: number;
   calibrationMessage: string;
-  registerGestureCallback: (cb: (action: EyeAction) => void) => () => void;
+  overlaySettings: OverlayDisplaySettings;
+  setOverlaySettings: (updater: Partial<OverlayDisplaySettings> | ((prev: OverlayDisplaySettings) => OverlayDisplaySettings)) => void;
+  registerGestureCallback: (cb: (action: EyeAction) => boolean | void) => () => void;
   triggerManualAction: (action: EyeAction) => void;
+  isVisualizerOpen: boolean;
+  setVisualizerOpen: (open: boolean) => void;
 }
 
 export interface EyeTrackingTelemetryContextType {
@@ -35,8 +52,11 @@ export interface EyeTrackingTelemetryContextType {
 const EyeTrackingSettingsContext = createContext<EyeTrackingSettingsContextType | undefined>(undefined);
 const EyeTrackingTelemetryContext = createContext<EyeTrackingTelemetryContextType | undefined>(undefined);
 
-// Telemetry update interval for UI rendering (approx 10-11 FPS)
-const TELEMETRY_THROTTLE_MS = 90;
+// Telemetry update interval for UI rendering (approx 12-15 FPS to prevent UI churn)
+const TELEMETRY_THROTTLE_MS = 65;
+
+// Cooldown between eye operations (2.5 seconds)
+const ACTION_COOLDOWN_MS = 2500;
 
 export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -49,6 +69,32 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [libsLoading, setLibsLoading] = useState(true);
   const [libError, setLibError] = useState<string | null>(null);
+  const [isVisualizerOpen, setVisualizerOpen] = useState(false);
+
+  // Overlay visual layer toggles
+  const [overlaySettings, setOverlaySettingsState] = useState<OverlayDisplaySettings>(() => {
+    const saved = localStorage.getItem('luckydream_overlay_settings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // Fallback
+      }
+    }
+    return {
+      showMesh: true,
+      showEyes: true,
+      showIris: true,
+    };
+  });
+
+  const setOverlaySettings = useCallback((updater: Partial<OverlayDisplaySettings> | ((prev: OverlayDisplaySettings) => OverlayDisplaySettings)) => {
+    setOverlaySettingsState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
+      localStorage.setItem('luckydream_overlay_settings', JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   // Settings with localStorage persistence
   const [settings, setSettings] = useState<EyeControlSettings>(() => {
@@ -61,8 +107,11 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     const defaultSpeechVolume = savedSpeechVolume !== null ? Math.max(0, Math.min(1, parseFloat(savedSpeechVolume))) : 1.0;
     const defaultSpeechRate = savedSpeechRate !== null ? Math.max(0.7, Math.min(1.5, parseFloat(savedSpeechRate))) : 1.0;
 
-    let base: EyeControlSettings = {
-      eyeControlEnabled: false,
+    const savedEyeEnabled = localStorage.getItem('luckydream_eye_enabled');
+    const defaultEyeEnabled = savedEyeEnabled !== null ? savedEyeEnabled === 'true' : true;
+
+    const base: EyeControlSettings = {
+      eyeControlEnabled: defaultEyeEnabled,
       dwellTimeMs: 1500,
       soundFeedback: true,
       simulatorMode: true,
@@ -95,90 +144,237 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     });
   }, [settings]);
 
-  const [calibration, setCalibration] = useState<EyeCalibrationData>({
-    neutralEAR: 0.25,
-    blinkThreshold: 0.15,
-    neutralIrisH: 0.5,
-    neutralIrisV: 0.5,
-    isCalibrated: false,
+  // Calibration state with 5 directions
+  const [calibration, setCalibration] = useState<EyeCalibrationData>(() => {
+    const saved = localStorage.getItem('eyeai_calibration') || localStorage.getItem('luckydream_eye_calibration');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return {
+          ...parsed,
+          thresholdUp: Math.max(0.016, Math.min(parsed.thresholdUp || 0.018, 0.026)),
+          thresholdDown: Math.max(0.016, Math.min(parsed.thresholdDown || 0.018, 0.026)),
+          thresholdLeft: Math.max(0.024, Math.min(parsed.thresholdLeft || 0.028, 0.036)),
+          thresholdRight: Math.max(0.024, Math.min(parsed.thresholdRight || 0.028, 0.036)),
+          thresholdV: Math.max(0.016, Math.min(parsed.thresholdV || 0.018, 0.026)),
+          thresholdH: Math.max(0.024, Math.min(parsed.thresholdH || 0.028, 0.036)),
+          isCalibrated: false, // Ensure dynamic auto-centering on fresh startup
+        };
+      } catch (e) {
+        // Fallback
+      }
+    }
+    return {
+      neutralEAR: 0.25,
+      blinkThreshold: 0.15,
+      neutralIrisH: 0.0,
+      neutralIrisV: 0.0,
+      thresholdH: 0.026,
+      thresholdV: 0.018,
+      thresholdUp: 0.018,
+      thresholdDown: 0.018,
+      thresholdLeft: 0.026,
+      thresholdRight: 0.026,
+      isCalibrated: false,
+    };
   });
 
   const [calibrationStage, setCalibrationStage] = useState<'idle' | 'countdown' | 'collecting' | 'completed'>('idle');
+  const [calibrationStep, setCalibrationStep] = useState<CalibrationStep>('idle');
   const [calibrationProgress, setCalibrationProgress] = useState(0);
   const [calibrationMessage, setCalibrationMessage] = useState('Bấm nút để bắt đầu hiệu chỉnh');
 
-  // React State for UI Telemetry (Throttled to 8-12 FPS)
+  // React State for UI Telemetry & Command Arbiter
   const [trackingState, setTrackingState] = useState<EyeTrackingState>({
-    rawEAR: 0.25,
-    leftEAR: 0.25,
-    rightEAR: 0.25,
+    rawEAR: 0.28,
+    leftEAR: 0.28,
+    rightEAR: 0.28,
+    blinkThreshold: 0.22,
+    baselineEAR: 0.28,
+    gazeDirection: 'CENTER',
     directionH: 'CENTER',
     directionV: 'CENTER',
     currentAction: 'NONE',
+    lastExecutedAction: 'NONE',
+    lastExecutedTimestamp: 0,
     actionProgress: 0,
     lastActionTriggered: '—',
     faceDetected: false,
     cameraActive: false,
     eyesClosed: false,
     blinkCount: 0,
+    blinkWindowRemainingMs: 0,
     closedDuration: 0.0,
     cameraError: null,
+    rawGazeX: 0,
+    rawGazeY: 0,
+    gazeX: 0,
+    gazeY: 0,
+    headYaw: 0,
+    headPitch: 0,
+    confidence: 0,
+    cooldownRemainingMs: 0,
+    cooldownTotalMs: ACTION_COOLDOWN_MS,
+    reArmed: true,
   });
 
-  // High-frequency mutable state in refs (Zero-overhead 30-60 FPS tracking)
+  // High-frequency mutable state in refs
   const latestTelemetryRef = useRef<EyeTrackingState>({ ...trackingState });
-  const latestMetricsRef = useRef<{ avgEAR: number; leftEAR: number; rightEAR: number; avgIrisH: number; avgIrisV: number }>({
+  const latestMetricsRef = useRef<{
+    avgEAR: number;
+    leftEAR: number;
+    rightEAR: number;
+    compensatedGazeX: number;
+    compensatedGazeY: number;
+    rawGazeX: number;
+    rawGazeY: number;
+    headYaw: number;
+    headPitch: number;
+    confidence: number;
+  }>({
     avgEAR: 0.25,
     leftEAR: 0.25,
     rightEAR: 0.25,
-    avgIrisH: 0.5,
-    avgIrisV: 0.5,
+    compensatedGazeX: 0,
+    compensatedGazeY: 0,
+    rawGazeX: 0,
+    rawGazeY: 0,
+    headYaw: 0,
+    headPitch: 0,
+    confidence: 0,
   });
   const lastTelemetryDispatchTime = useRef<number>(0);
 
-  const gestureCallbacksRef = useRef<Array<(action: EyeAction) => void>>([]);
+  const gestureCallbacksRef = useRef<Array<(action: EyeAction) => boolean | void>>([]);
 
-  const registerGestureCallback = useCallback((cb: (action: EyeAction) => void) => {
+  const registerGestureCallback = useCallback((cb: (action: EyeAction) => boolean | void) => {
     gestureCallbacksRef.current.push(cb);
     return () => {
       gestureCallbacksRef.current = gestureCallbacksRef.current.filter(c => c !== cb);
     };
   }, []);
 
-  const dispatchAction = useCallback((action: EyeAction) => {
-    if (action === 'NONE') return;
+  const dispatchAction = useCallback((action: EyeAction): boolean => {
+    if (action === 'NONE') return false;
+
+    let executed = false;
+    gestureCallbacksRef.current.forEach(cb => {
+      const res = cb(action);
+      if (res === true) {
+        executed = true;
+      }
+    });
+
     if (settings.soundFeedback) {
-      const soundMap: Record<EyeAction, string> = {
-        SELECT: 'Chọn',
-        NEXT: 'Sang phải',
-        BACK: 'Sang trái',
-        DOWN: 'Xuống',
-        UP: 'Lên',
-        NONE: '',
-      };
-      speakVietnamese(soundMap[action]);
+      if (executed) {
+        const soundMap: Record<EyeAction, string> = {
+          SELECT: 'Chọn',
+          NEXT: 'Sang phải',
+          RIGHT: 'Sang phải',
+          BACK: 'Sang trái',
+          LEFT: 'Sang trái',
+          DOWN: 'Xuống',
+          UP: 'Lên',
+          ESCAPE: 'Hủy thao tác',
+          DOUBLE_BLINK: 'Hủy thao tác',
+          NONE: '',
+        };
+        const soundText = soundMap[action];
+        if (soundText) {
+          speakVietnamese(soundText);
+        }
+      } else {
+        if (['RIGHT', 'NEXT', 'LEFT', 'BACK', 'UP', 'DOWN'].includes(action)) {
+          speakVietnamese('Không có phần tử theo hướng này');
+        }
+      }
     }
-    gestureCallbacksRef.current.forEach(cb => cb(action));
+
+    return executed;
   }, [settings.soundFeedback]);
 
   const triggerManualAction = useCallback((action: EyeAction) => {
-    const updated: EyeTrackingState = {
-      ...latestTelemetryRef.current,
-      currentAction: action,
-      lastActionTriggered: `${action} (Manual)`,
-    };
-    latestTelemetryRef.current = updated;
-    setTrackingState(updated);
-    dispatchAction(action);
+    const now = performance.now();
+    const executed = dispatchAction(action);
+    if (executed) {
+      cooldownTimer.current = ACTION_COOLDOWN_MS;
+      smoothGazeX.current = 0;
+      smoothGazeY.current = 0;
+      gazeDirState.current = 'CENTER';
+      currentGazeCandidate.current = 'CENTER';
+      gazeDwellStart.current = 0;
+      gazeFiredInThisLook.current = false;
+      reArmedRef.current = false;
+      centerStabilityStart.current = 0;
+      lastExecutedActionRef.current = action;
+      lastExecutedTimestampRef.current = now;
+      const updated: EyeTrackingState = {
+        ...latestTelemetryRef.current,
+        currentAction: action,
+        lastExecutedAction: action,
+        lastExecutedTimestamp: now,
+        lastActionTriggered: `${action} (Thủ công)`,
+        gazeDirection: 'CENTER',
+        directionH: 'CENTER',
+        directionV: 'CENTER',
+        gazeX: 0,
+        gazeY: 0,
+        rawGazeX: 0,
+        rawGazeY: 0,
+        cooldownRemainingMs: ACTION_COOLDOWN_MS,
+        cooldownTotalMs: ACTION_COOLDOWN_MS,
+        reArmed: false,
+      };
+      latestTelemetryRef.current = updated;
+      setTrackingState(updated);
+    } else {
+      smoothGazeX.current = 0;
+      smoothGazeY.current = 0;
+      gazeDirState.current = 'CENTER';
+      currentGazeCandidate.current = 'CENTER';
+      const updated: EyeTrackingState = {
+        ...latestTelemetryRef.current,
+        lastActionTriggered: `Không có phần tử ${action === 'RIGHT' ? 'bên phải' : action === 'LEFT' ? 'bên trái' : action === 'UP' ? 'phía trên' : action === 'DOWN' ? 'phía dưới' : 'hợp lệ'}`,
+        gazeDirection: 'CENTER',
+        directionH: 'CENTER',
+        directionV: 'CENTER',
+        gazeX: 0,
+        gazeY: 0,
+      };
+      latestTelemetryRef.current = updated;
+      setTrackingState(updated);
+    }
   }, [dispatchAction]);
 
-  // High precision state machine refs
+  // Gaze classification & Re-Arm state machine refs
+  const smoothGazeX = useRef<number>(0);
+  const smoothGazeY = useRef<number>(0);
+  const neutralRunningX = useRef<number>(0);
+  const neutralRunningY = useRef<number>(0);
+  const neutralRunningEAR = useRef<number>(0.26);
+  const initFramesCount = useRef<number>(0);
+  const noFaceFramesCount = useRef<number>(0);
+  const gazeDirState = useRef<GazeDirection>('CENTER');
+  const currentGazeCandidate = useRef<GazeDirection>('CENTER');
+  const gazeDwellStart = useRef<number>(0);
+  const gazeFiredInThisLook = useRef<boolean>(false);
+  const reArmedRef = useRef<boolean>(true);
+  const centerStabilityStart = useRef<number>(0);
+
+  // Double-Blink state machine refs (2 blinks in <= 1.5s = SELECT)
   const isEyesClosed = useRef<boolean>(false);
   const closeStartTime = useRef<number | null>(null);
-  const blinkTimestamps = useRef<number[]>([]);
-  const jstBlinksTimeout = useRef<any>(null);
-  const lastFrameTime = useRef<number>(performance.now());
+  const blinkCountInGesture = useRef<number>(0);
+  const firstBlinkTime = useRef<number>(0);
+  const lastBlinkEndTime = useRef<number>(0);
+  const selectSuccessUntil = useRef<number>(0);
+
+  // Command Arbiter Cooldown ref (1000ms standard)
   const cooldownTimer = useRef<number>(0);
+  const lastExecutedActionRef = useRef<EyeAction>('NONE');
+  const lastExecutedTimestampRef = useRef<number>(0);
+
+  const lastFrameTime = useRef<number>(performance.now());
 
   // Load MediaPipe CDN Script once
   useEffect(() => {
@@ -192,7 +388,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         const script = document.createElement('script');
         script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js';
         script.async = true;
-        
+
         const scriptPromise = new Promise((resolve, reject) => {
           script.onload = () => resolve(true);
           script.onerror = () => reject(new Error('Failed to load FaceMesh library from CDN.'));
@@ -216,17 +412,29 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   // Process face mesh frame results at high frequency (30 FPS)
   const processFaceMeshResults = useCallback((results: any) => {
     const now = performance.now();
-    const elapsed = now - lastFrameTime.current;
+    const elapsed = Math.min(100, Math.max(1, now - lastFrameTime.current));
     lastFrameTime.current = now;
 
     const landmarks = results.multiFaceLandmarks?.[0];
-    const canvas = canvasRef.current;
+
+    // Cache latest landmarks globally for live canvas overlays
+    (window as any).__eyeai_latest_landmarks = landmarks;
 
     // Fast exit if no face detected
     if (!landmarks) {
+      noFaceFramesCount.current += 1;
+      // If face has been missing for over ~2 seconds, reset auto-centering warm-up
+      if (noFaceFramesCount.current > 60) {
+        initFramesCount.current = 0;
+      }
+
       const prev = latestTelemetryRef.current;
       const shouldDispatch = prev.faceDetected || prev.eyesClosed || (now - lastTelemetryDispatchTime.current > TELEMETRY_THROTTLE_MS);
-      
+
+      if (cooldownTimer.current > 0) {
+        cooldownTimer.current = Math.max(0, cooldownTimer.current - elapsed);
+      }
+
       latestTelemetryRef.current = {
         ...prev,
         faceDetected: false,
@@ -234,12 +442,18 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         closedDuration: 0.0,
         currentAction: 'NONE',
         actionProgress: 0,
+        gazeDirection: 'UNKNOWN',
+        directionH: 'CENTER',
+        directionV: 'CENTER',
+        rawGazeX: 0,
+        rawGazeY: 0,
+        gazeX: 0,
+        gazeY: 0,
+        confidence: 0,
+        blinkCount: 0,
+        blinkWindowRemainingMs: 0,
+        cooldownRemainingMs: Math.round(cooldownTimer.current),
       };
-
-      if (canvas && canvas.isConnected) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
 
       if (shouldDispatch) {
         lastTelemetryDispatchTime.current = now;
@@ -248,254 +462,767 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    noFaceFramesCount.current = 0;
+
     const metrics = analyzeEyes(landmarks);
     if (!metrics) return;
 
-    // Cache metrics in ref for zero-I/O calibration access
-    latestMetricsRef.current = metrics;
+    // Cache metrics in ref
+    latestMetricsRef.current = {
+      avgEAR: metrics.avgEAR,
+      leftEAR: metrics.leftEAR,
+      rightEAR: metrics.rightEAR,
+      compensatedGazeX: metrics.compensatedGazeX,
+      compensatedGazeY: metrics.compensatedGazeY,
+      rawGazeX: metrics.rawGazeX,
+      rawGazeY: metrics.rawGazeY,
+      headYaw: metrics.headYaw,
+      headPitch: metrics.headPitch,
+      confidence: metrics.confidence,
+    };
 
-    // Direct 2D Canvas Landmark Overlay Drawing (Zero React overhead)
-    if (canvas && canvas.isConnected) {
-      const video = videoRef.current;
-      if (video && video.videoWidth > 0 && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-      }
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        const leftEyeLoop = [33, 160, 158, 133, 153, 144];
-        const rightEyeLoop = [362, 385, 387, 263, 373, 380];
-
-        const drawEyeOutline = (indices: number[], color: string) => {
-          ctx.beginPath();
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 2;
-          indices.forEach((idx, i) => {
-            const pt = landmarks[idx];
-            if (pt) {
-              const x = pt.x * canvas.width;
-              const y = pt.y * canvas.height;
-              if (i === 0) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
-            }
-          });
-          ctx.closePath();
-          ctx.stroke();
-        };
-
-        drawEyeOutline(leftEyeLoop, 'rgba(106, 201, 240, 0.8)');
-        drawEyeOutline(rightEyeLoop, 'rgba(106, 201, 240, 0.8)');
-
-        const drawPupil = (idx: number, color: string) => {
-          const pt = landmarks[idx];
-          if (pt) {
-            ctx.beginPath();
-            ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 4, 0, 2 * Math.PI);
-            ctx.fillStyle = color;
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-          }
-        };
-
-        drawPupil(EYE_INDICES.leftIris, '#FF6F61');
-        drawPupil(EYE_INDICES.rightIris, '#FF6F61');
-      }
-    }
-
-    // High Precision Gesture Detection State Machine
+    // Decrement Command Arbiter Cooldown Timer
     if (cooldownTimer.current > 0) {
       cooldownTimer.current -= elapsed;
       if (cooldownTimer.current < 0) cooldownTimer.current = 0;
     }
 
-    const isClosedNow = metrics.avgEAR < calibration.blinkThreshold;
-    let actionDetected: EyeAction = 'NONE';
-    let actionProg = 0;
-    let dirV: 'CENTER' | 'UP' | 'DOWN' = 'CENTER';
-
+    // =========================================================================
+    // 1. DOUBLE-BLINK TO SELECT STATE MACHINE (PRIORITY #1 - Evaluates BEFORE Gaze)
+    // - Chớp mắt 2 cái trong vòng 1.5s: CHỌN (SELECT)
+    // - Sau mỗi 1.5s nếu chưa đủ 2 cái sẽ tự động về 0
+    // - Cộng dồn đến 2 cái chớp là thực hiện thao tác chọn
+    // - Khi chớp mắt, TUYỆT ĐỐI KHÔNG nhận diện sang thao tác chuyển hướng khác
+    // =========================================================================
+    // Robust human baseline EAR (typically 0.26 - 0.38 when open)
+    const openBaselineEAR = Math.max(0.22, Math.min(0.42, neutralRunningEAR.current || calibration.neutralEAR || 0.29));
+    // When a human blinks naturally, EAR drops by ~22-38% from open baseline.
+    // Setting threshold to 78% of open baseline provides rapid, highly reliable detection without requiring hard squinting.
+    const dynamicBlinkThresh = Math.max(0.16, Math.min(0.28, openBaselineEAR * 0.78));
+    const blinkThresh = calibration.isCalibrated && calibration.blinkThreshold
+      ? Math.max(0.16, Math.min(0.29, calibration.blinkThreshold))
+      : dynamicBlinkThresh;
+    // Hysteresis: to close, drop below blinkThresh. To reopen, rise above blinkThresh + 0.015
+    const currentThresh = isEyesClosed.current ? (blinkThresh + 0.015) : blinkThresh;
+    const isClosedNow = metrics.avgEAR < currentThresh || (metrics.leftEAR < currentThresh && metrics.rightEAR < currentThresh);
     let curClosedDuration = 0.0;
+    let actionTriggeredThisFrame: EyeAction = 'NONE';
+    let actionProg = 0;
+
+    // Check expiration of 1.5s window for 2nd blink
+    if (blinkCountInGesture.current === 1) {
+      const elapsedSinceFirstBlink = now - firstBlinkTime.current;
+      if (elapsedSinceFirstBlink > 1500) {
+        blinkCountInGesture.current = 0;
+        firstBlinkTime.current = 0;
+        lastBlinkEndTime.current = now; // Add refractory buffer after window expires
+      }
+    }
+
     if (isClosedNow) {
+      // While eyes are closing or closed, gaze is strictly locked at CENTER
+      smoothGazeX.current = 0;
+      smoothGazeY.current = 0;
+      gazeDirState.current = 'CENTER';
+      currentGazeCandidate.current = 'CENTER';
+      gazeDwellStart.current = 0;
+      gazeFiredInThisLook.current = false;
+      centerStabilityStart.current = 0;
+
       if (!isEyesClosed.current) {
         isEyesClosed.current = true;
         closeStartTime.current = now;
       }
-      const holdDurationMs = now - (closeStartTime.current || now);
-      curClosedDuration = parseFloat((holdDurationMs / 1000).toFixed(1));
+      const holdMs = now - (closeStartTime.current || now);
+      curClosedDuration = parseFloat((holdMs / 1000).toFixed(1));
     } else {
       if (isEyesClosed.current) {
+        // Eyes JUST REOPENED! Evaluate blink duration
+        const blinkDuration = now - (closeStartTime.current || now);
         isEyesClosed.current = false;
-        const finalDurationMs = now - (closeStartTime.current || now);
         closeStartTime.current = null;
         curClosedDuration = 0.0;
+        lastBlinkEndTime.current = now; // Mark blink finished timestamp
 
-        // Process blink release sequences
-        if (finalDurationMs >= 50 && finalDurationMs < 450) {
-          const len = blinkTimestamps.current.length;
-          const lastBlink = len > 0 ? blinkTimestamps.current[len - 1] : 0;
-          if (!lastBlink || (now - lastBlink >= 250)) {
-            if (jstBlinksTimeout.current) clearTimeout(jstBlinksTimeout.current);
+        // Force gaze to CENTER upon reopening
+        smoothGazeX.current = 0;
+        smoothGazeY.current = 0;
+        gazeDirState.current = 'CENTER';
+        currentGazeCandidate.current = 'CENTER';
+        gazeDwellStart.current = 0;
+        gazeFiredInThisLook.current = false;
+        centerStabilityStart.current = 0;
 
-            blinkTimestamps.current.push(now);
-            blinkTimestamps.current = blinkTimestamps.current.filter(t => now - t <= 3500);
+        // Valid deliberate human blink is between 25ms and 750ms
+        const isValidBlink = blinkDuration >= 25 && blinkDuration <= 750;
 
-            const blinksCount = blinkTimestamps.current.length;
-            if (blinksCount === 1) {
-              jstBlinksTimeout.current = setTimeout(() => {
-                cooldownTimer.current = 600;
-                dispatchAction('SELECT');
-                const updated: EyeTrackingState = {
-                  ...latestTelemetryRef.current,
-                  lastActionTriggered: 'SELECT',
-                  currentAction: 'NONE',
-                  blinkCount: 0,
-                };
-                latestTelemetryRef.current = updated;
-                setTrackingState(updated);
-                blinkTimestamps.current = [];
-              }, 1000);
-            } else if (blinksCount === 2) {
-              const holdsWithin1_5s = (blinkTimestamps.current[1] - blinkTimestamps.current[0]) <= 1500;
-              if (holdsWithin1_5s) {
-                jstBlinksTimeout.current = setTimeout(() => {
-                  cooldownTimer.current = 600;
-                  dispatchAction('NEXT');
-                  const updated: EyeTrackingState = {
-                    ...latestTelemetryRef.current,
-                    lastActionTriggered: 'RIGHT',
-                    currentAction: 'NONE',
-                    blinkCount: 0,
-                  };
-                  latestTelemetryRef.current = updated;
-                  setTrackingState(updated);
-                  blinkTimestamps.current = [];
-                }, 1100);
-              } else {
-                blinkTimestamps.current = [now];
-                jstBlinksTimeout.current = setTimeout(() => {
-                  cooldownTimer.current = 600;
-                  dispatchAction('SELECT');
-                  const updated: EyeTrackingState = {
-                    ...latestTelemetryRef.current,
-                    lastActionTriggered: 'SELECT',
-                    currentAction: 'NONE',
-                    blinkCount: 0,
-                  };
-                  latestTelemetryRef.current = updated;
-                  setTrackingState(updated);
-                  blinkTimestamps.current = [];
-                }, 1000);
-              }
-            } else if (blinksCount >= 3) {
-              const currentLen = blinkTimestamps.current.length;
-              const holdsWithin3_5s = (blinkTimestamps.current[currentLen - 1] - blinkTimestamps.current[currentLen - 3]) <= 3500;
-              if (holdsWithin3_5s) {
-                cooldownTimer.current = 600;
-                dispatchAction('BACK');
-                const updated: EyeTrackingState = {
-                  ...latestTelemetryRef.current,
-                  lastActionTriggered: 'LEFT',
-                  currentAction: 'NONE',
-                  blinkCount: 0,
-                };
-                latestTelemetryRef.current = updated;
-                setTrackingState(updated);
-              }
-              blinkTimestamps.current = [];
+        if (isValidBlink && cooldownTimer.current <= 0) {
+          if (blinkCountInGesture.current === 0) {
+            // First blink registered!
+            blinkCountInGesture.current = 1;
+            firstBlinkTime.current = now;
+          } else if (blinkCountInGesture.current === 1) {
+            // Second blink registered!
+            const interval = now - firstBlinkTime.current;
+            if (interval <= 1500) {
+              // Valid Double-Blink within 1.5s -> Trigger SELECT!
+              blinkCountInGesture.current = 0;
+              firstBlinkTime.current = 0;
+              selectSuccessUntil.current = now + 1200; // Keep showing 2 / 2 on UI for 1.2s
+
+              const executed = dispatchAction('SELECT');
+              const nowTs = performance.now();
+              cooldownTimer.current = ACTION_COOLDOWN_MS; // 2.5s cooldown
+              actionTriggeredThisFrame = 'SELECT';
+              lastExecutedActionRef.current = 'SELECT';
+              lastExecutedTimestampRef.current = nowTs;
+              reArmedRef.current = false;
+
+              // Firmly lock gaze
+              smoothGazeX.current = 0;
+              smoothGazeY.current = 0;
+              gazeDirState.current = 'CENTER';
+              currentGazeCandidate.current = 'CENTER';
+              gazeDwellStart.current = 0;
+              gazeFiredInThisLook.current = false;
+              centerStabilityStart.current = 0;
+
+              const updatedSelect: EyeTrackingState = {
+                ...latestTelemetryRef.current,
+                rawEAR: parseFloat(metrics.avgEAR.toFixed(3)),
+                blinkThreshold: parseFloat(blinkThresh.toFixed(3)),
+                baselineEAR: parseFloat(openBaselineEAR.toFixed(3)),
+                lastActionTriggered: executed ? 'SELECT (Chớp mắt 2 cái - Đã Chọn)' : 'Chưa có phần tử được chọn',
+                currentAction: 'SELECT',
+                lastExecutedAction: 'SELECT',
+                lastExecutedTimestamp: nowTs,
+                gazeDirection: 'CENTER',
+                directionH: 'CENTER',
+                directionV: 'CENTER',
+                gazeX: 0,
+                gazeY: 0,
+                rawGazeX: 0,
+                rawGazeY: 0,
+                blinkCount: 2,
+                blinkWindowRemainingMs: 0,
+                closedDuration: 0,
+                actionProgress: 100,
+                cooldownRemainingMs: ACTION_COOLDOWN_MS,
+                cooldownTotalMs: ACTION_COOLDOWN_MS,
+              };
+              latestTelemetryRef.current = updatedSelect;
+              setTrackingState(updatedSelect);
+            } else {
+              // Exceeded 1.5s: Start new cycle with this blink as #1
+              blinkCountInGesture.current = 1;
+              firstBlinkTime.current = now;
             }
           }
-        } else if (finalDurationMs >= 800 && finalDurationMs <= 1300) {
-          cooldownTimer.current = 500;
-          dispatchAction('SELECT');
-          const updated: EyeTrackingState = {
-            ...latestTelemetryRef.current,
-            lastActionTriggered: 'SELECT',
-            currentAction: 'NONE',
-            blinkCount: 0,
-          };
-          latestTelemetryRef.current = updated;
-          setTrackingState(updated);
-        } else if (finalDurationMs >= 1400 && finalDurationMs <= 2200) {
-          cooldownTimer.current = 500;
-          dispatchAction('DOWN');
-          const updated: EyeTrackingState = {
-            ...latestTelemetryRef.current,
-            lastActionTriggered: 'DOWN',
-            currentAction: 'NONE',
-            blinkCount: 0,
-          };
-          latestTelemetryRef.current = updated;
-          setTrackingState(updated);
-        } else if (finalDurationMs >= 2300) {
-          cooldownTimer.current = 500;
-          dispatchAction('UP');
-          const updated: EyeTrackingState = {
-            ...latestTelemetryRef.current,
-            lastActionTriggered: 'UP',
-            currentAction: 'NONE',
-            blinkCount: 0,
-          };
-          latestTelemetryRef.current = updated;
-          setTrackingState(updated);
+        } else if (blinkDuration > 800) {
+          // Prolonged closure: not a blink gesture, reset window
+          blinkCountInGesture.current = 0;
+          firstBlinkTime.current = 0;
         }
       }
     }
 
-    if (cooldownTimer.current <= 0 && isClosedNow && closeStartTime.current) {
-      const holdDuration = now - closeStartTime.current;
-      if (holdDuration >= 450 && holdDuration <= 1300) {
-        actionDetected = 'SELECT';
-        actionProg = Math.min(100, Math.round(((holdDuration - 450) / 450) * 100));
-      } else if (holdDuration > 1300 && holdDuration <= 2200) {
-        actionDetected = 'DOWN';
-        dirV = 'DOWN';
-        actionProg = Math.min(100, Math.round(((holdDuration - 1300) / 600) * 100));
-      } else if (holdDuration > 2200) {
-        actionDetected = 'UP';
-        dirV = 'UP';
-        actionProg = Math.min(100, Math.round(((holdDuration - 2200) / 400) * 100));
+    // Telemetry feedback during 1.5s waiting window for 2nd blink
+    if (blinkCountInGesture.current === 1 && actionTriggeredThisFrame === 'NONE' && cooldownTimer.current <= 0) {
+      const remainingMs = Math.max(0, 1500 - (now - firstBlinkTime.current));
+      const remainingSecs = (remainingMs / 1000).toFixed(1);
+      actionProg = Math.min(100, Math.round((remainingMs / 1500) * 100));
+
+      latestTelemetryRef.current = {
+        ...latestTelemetryRef.current,
+        blinkCount: 1,
+        blinkWindowRemainingMs: Math.round(remainingMs),
+        actionProgress: actionProg,
+        lastActionTriggered: `Đã chớp 1 cái (Chớp cái 2 trong ${remainingSecs}s để Chọn)...`,
+      };
+    }
+
+    // =========================================================================
+    // 2. CANTHAL-REFERENCED GAZE DIRECTION CLASSIFIER (PRIORITY #2)
+    // =========================================================================
+    // Dynamic thresholds from calibration (or robust defaults)
+    const threshUp = Math.max(0.014, Math.min(calibration.thresholdUp || 0.018, 0.024));
+    const threshDown = Math.max(0.014, Math.min(calibration.thresholdDown || 0.018, 0.024));
+    const threshLeft = Math.max(0.020, Math.min(calibration.thresholdLeft || 0.026, 0.034));
+    const threshRight = Math.max(0.020, Math.min(calibration.thresholdRight || 0.026, 0.034));
+
+    // AUTO-ZERO WARM-UP (First 35 frames when face is detected)
+    if (initFramesCount.current < 35) {
+      initFramesCount.current += 1;
+      if (initFramesCount.current === 1) {
+        neutralRunningX.current = metrics.compensatedGazeX;
+        neutralRunningY.current = metrics.compensatedGazeY;
+        neutralRunningEAR.current = Math.max(0.24, metrics.avgEAR);
+      } else {
+        neutralRunningX.current = 0.25 * metrics.compensatedGazeX + 0.75 * neutralRunningX.current;
+        neutralRunningY.current = 0.25 * metrics.compensatedGazeY + 0.75 * neutralRunningY.current;
+        if (metrics.avgEAR > 0.20) {
+          neutralRunningEAR.current = 0.15 * metrics.avgEAR + 0.85 * neutralRunningEAR.current;
+        }
+      }
+      smoothGazeX.current = 0;
+      smoothGazeY.current = 0;
+      gazeDirState.current = 'CENTER';
+    } else {
+      // Continuous gentle drift compensation while user rests at CENTER and eyes are open
+      if (gazeDirState.current === 'CENTER' && !isEyesClosed.current && !isClosedNow && metrics.avgEAR >= blinkThresh + 0.025) {
+        const driftAlpha = 0.012;
+        neutralRunningX.current = driftAlpha * metrics.compensatedGazeX + (1 - driftAlpha) * neutralRunningX.current;
+        neutralRunningY.current = driftAlpha * metrics.compensatedGazeY + (1 - driftAlpha) * neutralRunningY.current;
+        if (metrics.avgEAR >= blinkThresh + 0.03) {
+          neutralRunningEAR.current = 0.005 * metrics.avgEAR + 0.995 * neutralRunningEAR.current;
+        }
       }
     }
 
-    const prevTelemetry = latestTelemetryRef.current;
-    const currentBlinkCount = blinkTimestamps.current.length;
+    const neutralX = calibration.isCalibrated && calibration.neutralIrisH
+      ? calibration.neutralIrisH
+      : neutralRunningX.current;
+    const neutralY = calibration.isCalibrated && calibration.neutralIrisV
+      ? calibration.neutralIrisV
+      : neutralRunningY.current;
 
-    // Check if significant state transition occurred
+    const rawDeltaX = metrics.compensatedGazeX - neutralX;
+    const rawDeltaY = metrics.compensatedGazeY - neutralY;
+
+    // GAZE CLASSIFICATION SAFETY GATE:
+    // Gaze movement is strictly prohibited if:
+    // - Cooldown is active (> 0)
+    // - Eyes are closed or closing (isClosedNow || isEyesClosed.current)
+    // - Eyes are narrowed or in mid-blink (metrics.avgEAR < blinkThresh + 0.015)
+    // - Within 300ms of eyes reopening after closing (prevents landmark jitter)
+    // - Blink gesture is pending (blinkCountInGesture.current > 0) -> LOCK GAZE COMPLETELY
+    // - Action already triggered this frame
+    const isGazeAllowed =
+      initFramesCount.current >= 35 &&
+      cooldownTimer.current <= 0 &&
+      !isClosedNow &&
+      !isEyesClosed.current &&
+      metrics.avgEAR >= blinkThresh + 0.015 &&
+      (now - lastBlinkEndTime.current >= 300) &&
+      blinkCountInGesture.current === 0 &&
+      actionTriggeredThisFrame === 'NONE';
+
+    let detectedDir: GazeDirection = 'CENTER';
+    actionProg = 0;
+
+    if (!isGazeAllowed) {
+      smoothGazeX.current = 0;
+      smoothGazeY.current = 0;
+      detectedDir = 'CENTER';
+      currentGazeCandidate.current = 'CENTER';
+      gazeDwellStart.current = 0;
+      gazeFiredInThisLook.current = false;
+      centerStabilityStart.current = 0;
+    } else {
+      // Exponential Moving Average smoothing
+      const alpha = 0.45;
+      smoothGazeX.current = alpha * rawDeltaX + (1 - alpha) * smoothGazeX.current;
+      smoothGazeY.current = alpha * rawDeltaY + (1 - alpha) * smoothGazeY.current;
+
+      const curGx = smoothGazeX.current;
+      const curGy = smoothGazeY.current;
+
+      // Hysteresis release thresholds
+      const relUp = threshUp * 0.55;
+      const relDown = threshDown * 0.55;
+      const relLeft = threshLeft * 0.55;
+      const relRight = threshRight * 0.55;
+
+      const curGazeState = gazeDirState.current;
+
+      if (curGazeState === 'CENTER' || curGazeState === 'UNKNOWN') {
+        const normH = Math.abs(curGx) / (curGx >= 0 ? threshRight : threshLeft);
+        const normV = Math.abs(curGy) / (curGy >= 0 ? threshDown : threshUp);
+
+        if (normH >= 1.0 && normH > normV * 1.05) {
+          detectedDir = curGx > 0 ? 'RIGHT' : 'LEFT';
+        } else if (normV >= 1.0 && normV > normH * 1.05) {
+          detectedDir = curGy > 0 ? 'DOWN' : 'UP';
+        } else {
+          detectedDir = 'CENTER';
+        }
+      } else if (curGazeState === 'RIGHT') {
+        detectedDir = curGx < relRight ? 'CENTER' : 'RIGHT';
+      } else if (curGazeState === 'LEFT') {
+        detectedDir = curGx > -relLeft ? 'CENTER' : 'LEFT';
+      } else if (curGazeState === 'DOWN') {
+        detectedDir = curGy < relDown ? 'CENTER' : 'DOWN';
+      } else if (curGazeState === 'UP') {
+        detectedDir = curGy > -relUp ? 'CENTER' : 'UP';
+      }
+
+      if (metrics.confidence < 0.35) {
+        detectedDir = 'UNKNOWN';
+      }
+
+      gazeDirState.current = detectedDir;
+
+      // Re-arm state check
+      if (detectedDir === 'CENTER') {
+        if (centerStabilityStart.current === 0) {
+          centerStabilityStart.current = now;
+        } else if (now - centerStabilityStart.current >= 140) {
+          reArmedRef.current = true;
+        }
+      } else {
+        centerStabilityStart.current = 0;
+      }
+
+      // Intentional Dwell Confirmation (220ms = deliberate glance)
+      const targetDwellMs = 220;
+      if (detectedDir !== 'CENTER' && detectedDir !== 'UNKNOWN') {
+        if (currentGazeCandidate.current !== detectedDir) {
+          currentGazeCandidate.current = detectedDir;
+          gazeDwellStart.current = now;
+          gazeFiredInThisLook.current = false;
+        } else {
+          const dwellDuration = now - gazeDwellStart.current;
+          actionProg = Math.min(100, Math.round((dwellDuration / targetDwellMs) * 100));
+
+          if (dwellDuration >= targetDwellMs) {
+            if (
+              !gazeFiredInThisLook.current &&
+              reArmedRef.current &&
+              cooldownTimer.current <= 0
+            ) {
+              const mappedAction: EyeAction =
+                detectedDir === 'RIGHT' ? 'RIGHT' :
+                detectedDir === 'LEFT' ? 'LEFT' :
+                detectedDir === 'UP' ? 'UP' : 'DOWN';
+
+              actionTriggeredThisFrame = mappedAction;
+              gazeFiredInThisLook.current = true;
+              reArmedRef.current = false;
+
+              const executed = dispatchAction(mappedAction);
+              if (executed) {
+                lastExecutedActionRef.current = mappedAction;
+                lastExecutedTimestampRef.current = now;
+                cooldownTimer.current = ACTION_COOLDOWN_MS; // 2.5s cooldown
+                smoothGazeX.current = 0;
+                smoothGazeY.current = 0;
+                gazeDirState.current = 'CENTER';
+                currentGazeCandidate.current = 'CENTER';
+                gazeDwellStart.current = 0;
+                gazeFiredInThisLook.current = false;
+                reArmedRef.current = false;
+                centerStabilityStart.current = 0;
+
+                const updated: EyeTrackingState = {
+                  ...latestTelemetryRef.current,
+                  lastActionTriggered: `${mappedAction} (Ánh mắt)`,
+                  currentAction: mappedAction,
+                  lastExecutedAction: mappedAction,
+                  lastExecutedTimestamp: now,
+                  gazeDirection: 'CENTER',
+                  directionH: 'CENTER',
+                  directionV: 'CENTER',
+                  gazeX: 0,
+                  gazeY: 0,
+                  rawGazeX: 0,
+                  rawGazeY: 0,
+                  cooldownRemainingMs: ACTION_COOLDOWN_MS,
+                  cooldownTotalMs: ACTION_COOLDOWN_MS,
+                  reArmed: false,
+                };
+                latestTelemetryRef.current = updated;
+                setTrackingState(updated);
+              } else {
+                smoothGazeX.current = 0;
+                smoothGazeY.current = 0;
+                gazeDirState.current = 'CENTER';
+                currentGazeCandidate.current = 'CENTER';
+                gazeDwellStart.current = 0;
+                gazeFiredInThisLook.current = false;
+                reArmedRef.current = false;
+                centerStabilityStart.current = 0;
+                cooldownTimer.current = 1000;
+                const dirText =
+                  mappedAction === 'RIGHT' ? 'bên phải' :
+                  mappedAction === 'LEFT' ? 'bên trái' :
+                  mappedAction === 'UP' ? 'phía trên' : 'phía dưới';
+
+                const updated: EyeTrackingState = {
+                  ...latestTelemetryRef.current,
+                  lastActionTriggered: `Không có phần tử ${dirText}`,
+                  currentAction: 'NONE',
+                  gazeDirection: 'CENTER',
+                  directionH: 'CENTER',
+                  directionV: 'CENTER',
+                  gazeX: 0,
+                  gazeY: 0,
+                  reArmed: false,
+                };
+                latestTelemetryRef.current = updated;
+                setTrackingState(updated);
+              }
+            }
+          }
+        }
+      } else {
+        currentGazeCandidate.current = detectedDir;
+        gazeFiredInThisLook.current = false;
+      }
+    }
+
+    const detectedDirH: 'LEFT' | 'RIGHT' | 'CENTER' =
+      detectedDir === 'RIGHT' ? 'RIGHT' : detectedDir === 'LEFT' ? 'LEFT' : 'CENTER';
+    const detectedDirV: 'UP' | 'DOWN' | 'CENTER' =
+      detectedDir === 'UP' ? 'UP' : detectedDir === 'DOWN' ? 'DOWN' : 'CENTER';
+    const curGx = smoothGazeX.current;
+    const curGy = smoothGazeY.current;
+
+    // =========================================================================
+    // 4. REACT STATE TELEMETRY DISPATCH (THROTTLED & SYNCED WITH ARBITER)
+    // =========================================================================
+    const prevTelemetry = latestTelemetryRef.current;
+    let currentBlinkCount = blinkCountInGesture.current;
+    let currentBlinkRemainingMs = 0;
+
+    if (now < selectSuccessUntil.current) {
+      currentBlinkCount = 2;
+      currentBlinkRemainingMs = 0;
+    } else if (blinkCountInGesture.current === 1) {
+      currentBlinkCount = 1;
+      currentBlinkRemainingMs = Math.max(0, 1500 - (now - firstBlinkTime.current));
+    } else {
+      currentBlinkCount = 0;
+      currentBlinkRemainingMs = 0;
+    }
+
     const hasMajorTransition =
       prevTelemetry.faceDetected !== true ||
       prevTelemetry.eyesClosed !== isClosedNow ||
       prevTelemetry.blinkCount !== currentBlinkCount ||
-      prevTelemetry.currentAction !== actionDetected ||
-      prevTelemetry.directionV !== dirV;
+      prevTelemetry.gazeDirection !== detectedDir ||
+      actionTriggeredThisFrame !== 'NONE';
 
     const timeSinceLastDispatch = now - lastTelemetryDispatchTime.current;
-    const isThrottleDue = timeSinceLastDispatch >= TELEMETRY_THROTTLE_MS;
+    const isThrottleDue = timeSinceLastDispatch >= (currentBlinkCount === 1 ? 40 : TELEMETRY_THROTTLE_MS);
 
     const nextTelemetry: EyeTrackingState = {
       ...prevTelemetry,
-      rawEAR: metrics.avgEAR,
-      leftEAR: metrics.leftEAR,
-      rightEAR: metrics.rightEAR,
-      directionH: 'CENTER',
-      directionV: dirV,
-      currentAction: actionDetected,
+      rawEAR: parseFloat(metrics.avgEAR.toFixed(3)),
+      leftEAR: parseFloat(metrics.leftEAR.toFixed(3)),
+      rightEAR: parseFloat(metrics.rightEAR.toFixed(3)),
+      blinkThreshold: parseFloat(blinkThresh.toFixed(3)),
+      baselineEAR: parseFloat(openBaselineEAR.toFixed(3)),
+      gazeDirection: detectedDir,
+      directionH: detectedDirH,
+      directionV: detectedDirV,
+      currentAction: actionTriggeredThisFrame !== 'NONE' ? actionTriggeredThisFrame : prevTelemetry.currentAction,
+      lastExecutedAction: lastExecutedActionRef.current,
+      lastExecutedTimestamp: lastExecutedTimestampRef.current,
       actionProgress: actionProg,
       faceDetected: true,
       eyesClosed: isClosedNow,
       blinkCount: currentBlinkCount,
+      blinkWindowRemainingMs: Math.round(currentBlinkRemainingMs),
       closedDuration: curClosedDuration,
+      rawGazeX: parseFloat(rawDeltaX.toFixed(3)),
+      rawGazeY: parseFloat(rawDeltaY.toFixed(3)),
+      gazeX: parseFloat(curGx.toFixed(3)),
+      gazeY: parseFloat(curGy.toFixed(3)),
+      headYaw: parseFloat(metrics.headYaw.toFixed(2)),
+      headPitch: parseFloat(metrics.headPitch.toFixed(2)),
+      confidence: parseFloat(metrics.confidence.toFixed(2)),
+      cooldownRemainingMs: Math.round(cooldownTimer.current),
+      cooldownTotalMs: ACTION_COOLDOWN_MS,
+      reArmed: reArmedRef.current,
     };
 
     latestTelemetryRef.current = nextTelemetry;
 
-    // Only dispatch to React state if major transition or throttled timer elapsed
     if (hasMajorTransition || isThrottleDue) {
       lastTelemetryDispatchTime.current = now;
       setTrackingState(nextTelemetry);
     }
-  }, [calibration.blinkThreshold, dispatchAction]);
+  }, [calibration, dispatchAction]);
+
+  // Simulator Keyboard Support
+  useEffect(() => {
+    if (!settings.simulatorMode) return;
+
+    let spaceTimer: any = null;
+    let spacePending = false;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      const now = performance.now();
+
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        if (cooldownTimer.current <= 0) {
+          const executed = dispatchAction('RIGHT');
+          if (executed) {
+            cooldownTimer.current = ACTION_COOLDOWN_MS;
+            smoothGazeX.current = 0;
+            smoothGazeY.current = 0;
+            gazeDirState.current = 'CENTER';
+            currentGazeCandidate.current = 'CENTER';
+            reArmedRef.current = false;
+            centerStabilityStart.current = 0;
+            lastExecutedActionRef.current = 'RIGHT';
+            lastExecutedTimestampRef.current = now;
+            setTrackingState(prev => ({
+              ...prev,
+              lastActionTriggered: 'RIGHT (Phím bấm)',
+              currentAction: 'RIGHT',
+              lastExecutedAction: 'RIGHT',
+              lastExecutedTimestamp: now,
+              gazeDirection: 'CENTER',
+              directionH: 'CENTER',
+              directionV: 'CENTER',
+              gazeX: 0,
+              gazeY: 0,
+              rawGazeX: 0,
+              rawGazeY: 0,
+              blinkCount: 0,
+              cooldownRemainingMs: ACTION_COOLDOWN_MS,
+              cooldownTotalMs: ACTION_COOLDOWN_MS,
+            }));
+          } else {
+            setTrackingState(prev => ({
+              ...prev,
+              lastActionTriggered: 'Không có phần tử bên phải',
+            }));
+          }
+        }
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        if (cooldownTimer.current <= 0) {
+          const executed = dispatchAction('LEFT');
+          if (executed) {
+            cooldownTimer.current = ACTION_COOLDOWN_MS;
+            smoothGazeX.current = 0;
+            smoothGazeY.current = 0;
+            gazeDirState.current = 'CENTER';
+            currentGazeCandidate.current = 'CENTER';
+            reArmedRef.current = false;
+            centerStabilityStart.current = 0;
+            lastExecutedActionRef.current = 'LEFT';
+            lastExecutedTimestampRef.current = now;
+            setTrackingState(prev => ({
+              ...prev,
+              lastActionTriggered: 'LEFT (Phím bấm)',
+              currentAction: 'LEFT',
+              lastExecutedAction: 'LEFT',
+              lastExecutedTimestamp: now,
+              gazeDirection: 'CENTER',
+              directionH: 'CENTER',
+              directionV: 'CENTER',
+              gazeX: 0,
+              gazeY: 0,
+              rawGazeX: 0,
+              rawGazeY: 0,
+              blinkCount: 0,
+              cooldownRemainingMs: ACTION_COOLDOWN_MS,
+              cooldownTotalMs: ACTION_COOLDOWN_MS,
+            }));
+          } else {
+            setTrackingState(prev => ({
+              ...prev,
+              lastActionTriggered: 'Không có phần tử bên trái',
+            }));
+          }
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (cooldownTimer.current <= 0) {
+          const executed = dispatchAction('UP');
+          if (executed) {
+            cooldownTimer.current = ACTION_COOLDOWN_MS;
+            smoothGazeX.current = 0;
+            smoothGazeY.current = 0;
+            gazeDirState.current = 'CENTER';
+            currentGazeCandidate.current = 'CENTER';
+            reArmedRef.current = false;
+            centerStabilityStart.current = 0;
+            lastExecutedActionRef.current = 'UP';
+            lastExecutedTimestampRef.current = now;
+            setTrackingState(prev => ({
+              ...prev,
+              lastActionTriggered: 'UP (Phím bấm)',
+              currentAction: 'UP',
+              lastExecutedAction: 'UP',
+              lastExecutedTimestamp: now,
+              gazeDirection: 'CENTER',
+              directionH: 'CENTER',
+              directionV: 'CENTER',
+              gazeX: 0,
+              gazeY: 0,
+              rawGazeX: 0,
+              rawGazeY: 0,
+              blinkCount: 0,
+              cooldownRemainingMs: ACTION_COOLDOWN_MS,
+              cooldownTotalMs: ACTION_COOLDOWN_MS,
+            }));
+          } else {
+            setTrackingState(prev => ({
+              ...prev,
+              lastActionTriggered: 'Không có phần tử phía trên',
+            }));
+          }
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (cooldownTimer.current <= 0) {
+          const executed = dispatchAction('DOWN');
+          if (executed) {
+            cooldownTimer.current = ACTION_COOLDOWN_MS;
+            smoothGazeX.current = 0;
+            smoothGazeY.current = 0;
+            gazeDirState.current = 'CENTER';
+            currentGazeCandidate.current = 'CENTER';
+            reArmedRef.current = false;
+            centerStabilityStart.current = 0;
+            lastExecutedActionRef.current = 'DOWN';
+            lastExecutedTimestampRef.current = now;
+            setTrackingState(prev => ({
+              ...prev,
+              lastActionTriggered: 'DOWN (Phím bấm)',
+              currentAction: 'DOWN',
+              lastExecutedAction: 'DOWN',
+              lastExecutedTimestamp: now,
+              gazeDirection: 'CENTER',
+              directionH: 'CENTER',
+              directionV: 'CENTER',
+              gazeX: 0,
+              gazeY: 0,
+              rawGazeX: 0,
+              rawGazeY: 0,
+              blinkCount: 0,
+              cooldownRemainingMs: ACTION_COOLDOWN_MS,
+              cooldownTotalMs: ACTION_COOLDOWN_MS,
+            }));
+          } else {
+            setTrackingState(prev => ({
+              ...prev,
+              lastActionTriggered: 'Không có phần tử phía dưới',
+            }));
+          }
+        }
+      } else if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        if (cooldownTimer.current <= 0) {
+          if (e.key === ' ') {
+            // Space simulates Double Blink in simulator mode
+            if (!spacePending) {
+              spacePending = true;
+              setTrackingState(prev => ({
+                ...prev,
+                blinkCount: 1,
+                blinkWindowRemainingMs: 1500,
+                lastActionTriggered: 'Đã chớp 1 cái (Bấm Space lần nữa trong 1.5s để Chọn)...',
+              }));
+              if (spaceTimer) clearTimeout(spaceTimer);
+              spaceTimer = setTimeout(() => {
+                spacePending = false;
+                setTrackingState(prev => ({
+                  ...prev,
+                  blinkCount: 0,
+                  blinkWindowRemainingMs: 0,
+                  lastActionTriggered: 'Hết 1.5s - Bộ đếm chớp mắt về 0',
+                }));
+              }, 1500);
+            } else {
+              // 2nd press within 1.5s -> Trigger SELECT!
+              if (spaceTimer) clearTimeout(spaceTimer);
+              spacePending = false;
+              selectSuccessUntil.current = performance.now() + 1200;
+              const executed = dispatchAction('SELECT');
+              const execTs = performance.now();
+              cooldownTimer.current = ACTION_COOLDOWN_MS;
+              smoothGazeX.current = 0;
+              smoothGazeY.current = 0;
+              gazeDirState.current = 'CENTER';
+              currentGazeCandidate.current = 'CENTER';
+              reArmedRef.current = false;
+              centerStabilityStart.current = 0;
+              lastExecutedActionRef.current = 'SELECT';
+              lastExecutedTimestampRef.current = execTs;
+
+              setTrackingState(prev => ({
+                ...prev,
+                lastActionTriggered: executed ? 'SELECT (Chớp 2 cái phím Space - Đã Chọn)' : 'Chưa có phần tử được chọn',
+                currentAction: 'SELECT',
+                lastExecutedAction: 'SELECT',
+                lastExecutedTimestamp: execTs,
+                blinkCount: 2,
+                blinkWindowRemainingMs: 0,
+                cooldownRemainingMs: ACTION_COOLDOWN_MS,
+                cooldownTotalMs: ACTION_COOLDOWN_MS,
+              }));
+            }
+          } else {
+            // Enter key directly triggers SELECT
+            const executed = dispatchAction('SELECT');
+            const execTs = performance.now();
+            cooldownTimer.current = ACTION_COOLDOWN_MS;
+            smoothGazeX.current = 0;
+            smoothGazeY.current = 0;
+            gazeDirState.current = 'CENTER';
+            currentGazeCandidate.current = 'CENTER';
+            reArmedRef.current = false;
+            centerStabilityStart.current = 0;
+            lastExecutedActionRef.current = 'SELECT';
+            lastExecutedTimestampRef.current = execTs;
+
+            setTrackingState(prev => ({
+              ...prev,
+              lastActionTriggered: executed ? 'SELECT (Phím Enter)' : 'Chưa có phần tử được chọn',
+              currentAction: 'SELECT',
+              lastExecutedAction: 'SELECT',
+              lastExecutedTimestamp: execTs,
+              blinkCount: 0,
+              blinkWindowRemainingMs: 0,
+              cooldownRemainingMs: ACTION_COOLDOWN_MS,
+              cooldownTotalMs: ACTION_COOLDOWN_MS,
+            }));
+          }
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        const executed = dispatchAction('ESCAPE');
+        if (executed) {
+          cooldownTimer.current = ACTION_COOLDOWN_MS;
+          smoothGazeX.current = 0;
+          smoothGazeY.current = 0;
+          gazeDirState.current = 'CENTER';
+          currentGazeCandidate.current = 'CENTER';
+          reArmedRef.current = false;
+          centerStabilityStart.current = 0;
+          lastExecutedActionRef.current = 'DOUBLE_BLINK';
+          lastExecutedTimestampRef.current = now;
+          setTrackingState(prev => ({
+            ...prev,
+            lastActionTriggered: 'HỦY THAO TÁC (Phím Escape)',
+            currentAction: 'ESCAPE',
+            lastExecutedAction: 'DOUBLE_BLINK',
+            lastExecutedTimestamp: now,
+            blinkCount: 0,
+            cooldownRemainingMs: ACTION_COOLDOWN_MS,
+            cooldownTotalMs: ACTION_COOLDOWN_MS,
+          }));
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      if (spaceTimer) clearTimeout(spaceTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [settings.simulatorMode, dispatchAction]);
 
   // Render loop using single FaceMesh instance with Concurrency Lock (Backpressure)
   const startTrackingLoop = useCallback(() => {
@@ -519,13 +1246,12 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
 
     const render = async () => {
       const video = videoRef.current;
-      // Concurrency lock: skip frame if previous send() is still processing
       if (video && video.readyState >= 2 && !isProcessingRef.current && faceMeshRef.current) {
         isProcessingRef.current = true;
         try {
           await faceMeshRef.current.send({ image: video });
         } catch (e) {
-          // Drop frame on error
+          console.error('[FaceMesh send error]:', e);
         } finally {
           isProcessingRef.current = false;
         }
@@ -538,17 +1264,14 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   }, [processFaceMeshResults]);
 
   const stopTrackingLoop = useCallback(() => {
-    console.log('[EYE CAMERA] stopTrackingLoop called');
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
     isProcessingRef.current = false;
     if (mediaStreamRef.current) {
-      console.log('[EYE CAMERA] Stopping camera tracks...');
       mediaStreamRef.current.getTracks().forEach(track => {
         track.stop();
-        console.log(`[EYE CAMERA] Track stopped: ${track.label || 'video track'}`);
       });
       mediaStreamRef.current = null;
       setCameraStream(null);
@@ -570,19 +1293,12 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startCamera = useCallback(async () => {
-    console.log('[EYE CAMERA] startCamera called');
-
     const isSec = typeof window !== 'undefined' ? window.isSecureContext : false;
     const hasMediaDevices = typeof navigator !== 'undefined' ? !!navigator.mediaDevices : false;
     const hasGetUserMedia = typeof navigator !== 'undefined' ? !!navigator.mediaDevices?.getUserMedia : false;
 
-    console.log('[EYE CAMERA] isSecureContext:', isSec);
-    console.log('[EYE CAMERA] mediaDevices:', hasMediaDevices);
-    console.log('[EYE CAMERA] getUserMedia:', hasGetUserMedia);
-
     if (typeof window !== 'undefined' && !isSec) {
       const errMsg = 'Trình duyệt yêu cầu ngữ cảnh bảo mật (HTTPS hoặc localhost) để mở Camera.';
-      console.error('[EYE CAMERA] Secure context check failed:', errMsg);
       const errState = { ...latestTelemetryRef.current, cameraActive: false, cameraError: errMsg };
       latestTelemetryRef.current = errState;
       setTrackingState(errState);
@@ -591,28 +1307,23 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
 
     if (!hasMediaDevices || !hasGetUserMedia) {
       const errMsg = 'Trình duyệt không hỗ trợ WebRTC / MediaDevices getUserMedia.';
-      console.error('[EYE CAMERA] mediaDevices check failed:', errMsg);
       const errState = { ...latestTelemetryRef.current, cameraActive: false, cameraError: errMsg };
       latestTelemetryRef.current = errState;
       setTrackingState(errState);
       return;
     }
 
-    // Reuse stream if already active
     if (mediaStreamRef.current && mediaStreamRef.current.active) {
       const activeTracks = mediaStreamRef.current.getVideoTracks().filter(t => t.readyState === 'live');
       if (activeTracks.length > 0) {
-        console.log('[EYE CAMERA] Stream already active, reusing existing stream.');
         if (videoRef.current) {
           if (videoRef.current.srcObject !== mediaStreamRef.current) {
-            console.log('[EYE CAMERA] assigning srcObject');
             videoRef.current.srcObject = mediaStreamRef.current;
           }
           try {
             await videoRef.current.play();
-            console.log('[EYE CAMERA] video playing');
           } catch (e) {
-            console.warn('[EYE CAMERA] video.play() warning:', e);
+            // Ignore
           }
           startTrackingLoop();
         }
@@ -628,11 +1339,8 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       latestTelemetryRef.current = clearingState;
       setTrackingState(clearingState);
 
-      console.log('[EYE CAMERA] requesting getUserMedia');
-
       let stream: MediaStream;
       try {
-        // Preferred constraint: front camera ideal at lightweight 640x480 resolution
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: 'user' },
@@ -642,54 +1350,24 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
           audio: false,
         });
       } catch (firstErr: any) {
-        console.warn('[EYE CAMERA] Preferred getUserMedia constraints failed, trying basic fallback:', firstErr?.name || firstErr);
         stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: false,
         });
       }
 
-      console.log('[EYE CAMERA] stream received');
       const tracks = stream.getVideoTracks();
-      console.log(`[EYE CAMERA] video tracks = ${tracks.length}`);
-
       if (tracks.length === 0) {
         throw new Error('No video tracks available in stream');
       }
 
-      const primaryTrack = tracks[0];
-      console.log(`[EYE CAMERA] track readyState = ${primaryTrack.readyState}`);
-      console.log(`[EYE CAMERA] track enabled = ${primaryTrack.enabled}`);
-
       mediaStreamRef.current = stream;
       setCameraStream(stream);
 
+      initFramesCount.current = 0;
       if (videoRef.current) {
-        console.log('[EYE CAMERA] assigning srcObject');
         videoRef.current.srcObject = stream;
-
-        // Ensure metadata is loaded
-        if (videoRef.current.readyState >= 1) {
-          console.log('[EYE CAMERA] metadata loaded');
-        } else {
-          await new Promise<void>((resolve) => {
-            if (!videoRef.current) return resolve();
-            videoRef.current.onloadedmetadata = () => {
-              console.log('[EYE CAMERA] metadata loaded');
-              resolve();
-            };
-          });
-        }
-
-        try {
-          if (videoRef.current) {
-            await videoRef.current.play();
-            console.log('[EYE CAMERA] video playing');
-          }
-        } catch (playErr: any) {
-          console.warn('[EYE CAMERA] video.play() warning:', playErr);
-        }
-
+        await videoRef.current.play();
         startTrackingLoop();
       }
 
@@ -697,161 +1375,303 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       latestTelemetryRef.current = readyState;
       setTrackingState(readyState);
     } catch (err: any) {
-      console.error(`[EYE CAMERA] getUserMedia failed: ${err.name || 'Error'} - ${err.message || err}`);
-      let errMsg = 'Không khởi tạo được camera.';
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        errMsg = 'Quyền truy cập máy ảnh bị từ chối. Vui lòng cho phép quyền Camera trên trình duyệt.';
-      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        errMsg = 'Không tìm thấy thiết bị camera trên máy.';
-      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-        errMsg = 'Camera đang bị ứng dụng khác chiếm giữ hoặc lỗi phần cứng.';
-      } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
-        errMsg = 'Cấu hình camera không phù hợp với thiết bị.';
-      } else if (err.name === 'AbortError') {
-        errMsg = 'Quá trình mở camera bị gián đoạn.';
-      } else if (err.name === 'SecurityError') {
-        errMsg = 'Ngữ cảnh không bảo mật hoặc bị chính sách bảo mật chặn camera.';
-      }
-
+      const errMsg = err.message || 'Không thể truy cập camera. Vui lòng cấp quyền camera.';
       const errState = { ...latestTelemetryRef.current, cameraActive: false, cameraError: errMsg };
       latestTelemetryRef.current = errState;
       setTrackingState(errState);
     }
   }, [startTrackingLoop]);
 
-  // Lifecycle control: Automatically start/stop camera on eyeControlEnabled toggle
-  useEffect(() => {
-    console.log(`[EYE CAMERA] eyeControlEnabled = ${settings.eyeControlEnabled}`);
-    if (settings.eyeControlEnabled) {
-      startCamera();
-    } else {
-      stopTrackingLoop();
-    }
-  }, [settings.eyeControlEnabled, startCamera, stopTrackingLoop]);
-
   const toggleCamera = useCallback(async () => {
-    if (latestTelemetryRef.current.cameraActive) {
+    if (mediaStreamRef.current && mediaStreamRef.current.active) {
       stopTrackingLoop();
     } else {
       await startCamera();
     }
   }, [startCamera, stopTrackingLoop]);
 
-  // Keyboard simulator handler
   useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (!settings.simulatorMode) return;
-      
-      let act: EyeAction = 'NONE';
-      switch (e.key) {
-        case 'ArrowRight':
-          e.preventDefault();
-          act = 'NEXT';
-          break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          act = 'BACK';
-          break;
-        case 'ArrowUp':
-          e.preventDefault();
-          act = 'UP';
-          break;
-        case 'ArrowDown':
-          e.preventDefault();
-          act = 'DOWN';
-          break;
-        case 'Enter':
-          e.preventDefault();
-          act = 'SELECT';
-          break;
-        default:
-          return;
-      }
-
-      const updated: EyeTrackingState = {
-        ...latestTelemetryRef.current,
-        currentAction: act,
-        lastActionTriggered: act === 'NEXT' ? 'RIGHT' : act === 'BACK' ? 'LEFT' : act,
-      };
-      latestTelemetryRef.current = updated;
-      setTrackingState(updated);
-
-      dispatchAction(act);
+    if (settings.eyeControlEnabled && !libsLoading && !libError) {
+      startCamera();
+    } else if (!settings.eyeControlEnabled) {
+      stopTrackingLoop();
     }
+  }, [settings.eyeControlEnabled, libsLoading, libError, startCamera, stopTrackingLoop]);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [settings.simulatorMode, dispatchAction]);
+  // Clean teardown on unmount
+  useEffect(() => {
+    return () => {
+      stopTrackingLoop();
+    };
+  }, [stopTrackingLoop]);
 
-  const startCalibration = useCallback(() => {
+  // =========================================================================
+  // 5. FIVE-POINT CALIBRATION WORKFLOW (CENTER -> UP -> DOWN -> LEFT -> RIGHT)
+  // =========================================================================
+  const calibrationCancelRef = useRef<boolean>(false);
+
+  const cancelCalibration = useCallback(() => {
+    calibrationCancelRef.current = true;
+    setCalibrationStep('idle');
+    setCalibrationStage('idle');
+    setCalibrationProgress(0);
+    setCalibrationMessage('Đã hủy hiệu chỉnh.');
+  }, []);
+
+  const resetCalibration = useCallback(() => {
+    initFramesCount.current = 0;
+    neutralRunningX.current = 0;
+    neutralRunningY.current = 0;
+    smoothGazeX.current = 0;
+    smoothGazeY.current = 0;
+    gazeDirState.current = 'CENTER';
+    const defaultCalib: EyeCalibrationData = {
+      neutralEAR: 0.25,
+      blinkThreshold: 0.16,
+      neutralIrisH: 0.0,
+      neutralIrisV: 0.0,
+      thresholdH: 0.028,
+      thresholdV: 0.018,
+      thresholdUp: 0.018,
+      thresholdDown: 0.018,
+      thresholdLeft: 0.028,
+      thresholdRight: 0.028,
+      isCalibrated: false,
+    };
+    setCalibration(defaultCalib);
+    localStorage.removeItem('luckydream_eye_calibration');
+    localStorage.removeItem('eyeai_calibration');
+    setCalibrationMessage('Đã đặt lại hiệu chỉnh mặc định.');
+    speakVietnamese('Đã đặt lại hiệu chỉnh');
+  }, []);
+
+  const reZeroCenter = useCallback(() => {
+    const currentMetrics = latestMetricsRef.current;
+    if (currentMetrics && currentMetrics.confidence >= 0.3) {
+      neutralRunningX.current = currentMetrics.compensatedGazeX;
+      neutralRunningY.current = currentMetrics.compensatedGazeY;
+    }
+    initFramesCount.current = 0;
+    smoothGazeX.current = 0;
+    smoothGazeY.current = 0;
+    gazeDirState.current = 'CENTER';
+    currentGazeCandidate.current = 'CENTER';
+    reArmedRef.current = true;
+    centerStabilityStart.current = performance.now();
+
+    setCalibration(prev => {
+      const updated: EyeCalibrationData = {
+        ...prev,
+        neutralIrisH: neutralRunningX.current,
+        neutralIrisV: neutralRunningY.current,
+      };
+      try {
+        localStorage.setItem('eyeai_calibration', JSON.stringify(updated));
+        localStorage.setItem('luckydream_eye_calibration', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    setTrackingState(prev => ({
+      ...prev,
+      gazeDirection: 'CENTER',
+      directionH: 'CENTER',
+      directionV: 'CENTER',
+      rawGazeX: 0,
+      rawGazeY: 0,
+      gazeX: 0,
+      gazeY: 0,
+      lastActionTriggered: 'Đã căn tâm',
+    }));
+
+    speakVietnamese('Đã căn tâm');
+  }, []);
+
+  const start5PointCalibration = useCallback(async () => {
+    calibrationCancelRef.current = false;
     setCalibrationStage('countdown');
     setCalibrationProgress(0);
-    setCalibrationMessage('Nhìn thẳng vào chấm đỏ ở giữa webcam...');
 
-    let countdown = 3;
-    const interval = setInterval(() => {
-      countdown--;
-      if (countdown <= 0) {
-        clearInterval(interval);
-        setCalibrationStage('collecting');
-        setCalibrationMessage('Đang thu thập dữ liệu mắt... Hãy nhìn thẳng!');
-        collectCalibrationPoints();
-      } else {
-        setCalibrationMessage(`Chuẩn bị... Nhìn thẳng trong ${countdown}s`);
-      }
-    }, 1000);
-  }, []);
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-  const collectCalibrationPoints = useCallback(() => {
-    const collectedEAR: number[] = [];
-    const collectedIrisH: number[] = [];
-    const collectedIrisV: number[] = [];
-    let samples = 0;
-    const maxSamples = 40;
+    // Helper to collect frames for a specific step
+    const collectStepFrames = async (stepName: CalibrationStep, promptText: string, voicePrompt: string) => {
+      if (calibrationCancelRef.current) return null;
 
-    const checkFrame = () => {
-      if (samples >= maxSamples) {
-        const avgEAR = collectedEAR.reduce((a, b) => a + b, 0) / (collectedEAR.length || 1);
-        const avgH = collectedIrisH.reduce((a, b) => a + b, 0) / (collectedIrisH.length || 1);
-        const avgV = collectedIrisV.reduce((a, b) => a + b, 0) / (collectedIrisV.length || 1);
-        const blinkThresh = avgEAR * 0.58;
+      setCalibrationStep(stepName);
+      setCalibrationStage('collecting');
+      setCalibrationMessage(promptText);
+      speakVietnamese(voicePrompt);
 
-        setCalibration({
-          neutralEAR: avgEAR,
-          blinkThreshold: blinkThresh,
-          neutralIrisH: avgH,
-          neutralIrisV: avgV,
-          isCalibrated: true
-        });
+      const collectedEAR: number[] = [];
+      const collectedX: number[] = [];
+      const collectedY: number[] = [];
 
-        setCalibrationStage('completed');
-        setCalibrationMessage('Hiệu chỉnh thành công!');
-        speakVietnamese('Hiệu chỉnh hoàn tất');
+      const requiredSamples = 32;
+      let samples = 0;
 
-        setTimeout(() => setCalibrationStage('idle'), 1500);
-        return;
+      for (let i = 0; i < 60 && samples < requiredSamples; i++) {
+        if (calibrationCancelRef.current) return null;
+        await sleep(55);
+
+        const currentMetrics = latestMetricsRef.current;
+        if (currentMetrics.avgEAR > 0.12 && currentMetrics.confidence > 0.4) {
+          collectedEAR.push(currentMetrics.avgEAR);
+          collectedX.push(currentMetrics.compensatedGazeX);
+          collectedY.push(currentMetrics.compensatedGazeY);
+          samples++;
+          setCalibrationProgress(Math.round((samples / requiredSamples) * 100));
+        }
       }
 
-      // Read from ultra-fast in-memory ref
-      const currentRawEAR = latestMetricsRef.current.avgEAR;
-      const currentRawH = latestMetricsRef.current.avgIrisH;
-      const currentRawV = latestMetricsRef.current.avgIrisV;
-
-      if (currentRawEAR > 0) {
-        collectedEAR.push(currentRawEAR);
-        collectedIrisH.push(currentRawH);
-        collectedIrisV.push(currentRawV);
-        samples++;
-        setCalibrationProgress(Math.round((samples / maxSamples) * 100));
+      if (samples < 15) {
+        // Not enough samples
+        return null;
       }
 
-      setTimeout(checkFrame, 50);
+      // Sort and take trimmed median to discard outliers
+      collectedEAR.sort((a, b) => a - b);
+      collectedX.sort((a, b) => a - b);
+      collectedY.sort((a, b) => a - b);
+
+      const midIdx = Math.floor(samples / 2);
+      const medianEAR = collectedEAR[midIdx];
+      const medianX = collectedX[midIdx];
+      const medianY = collectedY[midIdx];
+
+      return { medianEAR, medianX, medianY };
     };
 
-    checkFrame();
+    try {
+      // Step 1: Countdown
+      for (let cd = 3; cd > 0; cd--) {
+        if (calibrationCancelRef.current) return;
+        setCalibrationMessage(`Chuẩn bị... Giữ đầu thẳng trong ${cd}s`);
+        await sleep(1000);
+      }
+
+      // Step 2: CENTER (Nhìn thẳng)
+      const centerData = await collectStepFrames(
+        'center',
+        'Bước 1/5: Hãy nhìn thẳng vào tâm camera',
+        'Bước 1: Hãy nhìn thẳng vào tâm camera'
+      );
+      if (!centerData || calibrationCancelRef.current) {
+        throw new Error('Không thu thập đủ dữ liệu nhìn thẳng. Vui lòng thử lại.');
+      }
+      await sleep(400);
+
+      // Step 3: UP (Nhìn lên)
+      const upData = await collectStepFrames(
+        'up',
+        'Bước 2/5: Hãy nhìn lên phía trên',
+        'Bước 2: Hãy nhìn lên phía trên'
+      );
+      if (!upData || calibrationCancelRef.current) {
+        throw new Error('Không thu thập đủ dữ liệu nhìn lên.');
+      }
+      await sleep(400);
+
+      // Step 4: DOWN (Nhìn xuống)
+      const downData = await collectStepFrames(
+        'down',
+        'Bước 3/5: Hãy nhìn xuống phía dưới',
+        'Bước 3: Hãy nhìn xuống phía dưới'
+      );
+      if (!downData || calibrationCancelRef.current) {
+        throw new Error('Không thu thập đủ dữ liệu nhìn xuống.');
+      }
+      await sleep(400);
+
+      // Step 5: LEFT (Nhìn sang trái)
+      const leftData = await collectStepFrames(
+        'left',
+        'Bước 4/5: Hãy nhìn sang bên trái',
+        'Bước 4: Hãy nhìn sang bên trái'
+      );
+      if (!leftData || calibrationCancelRef.current) {
+        throw new Error('Không thu thập đủ dữ liệu nhìn trái.');
+      }
+      await sleep(400);
+
+      // Step 6: RIGHT (Nhìn sang phải)
+      const rightData = await collectStepFrames(
+        'right',
+        'Bước 5/5: Hãy nhìn sang bên phải',
+        'Bước 5: Hãy nhìn sang bên phải'
+      );
+      if (!rightData || calibrationCancelRef.current) {
+        throw new Error('Không thu thập đủ dữ liệu nhìn phải.');
+      }
+
+      // Compute adaptive personalized thresholds
+      const neutralEAR = centerData.medianEAR;
+      const neutralX = centerData.medianX;
+      const neutralY = centerData.medianY;
+
+      const deltaUp = Math.abs(upData.medianY - neutralY);
+      const deltaDown = Math.abs(downData.medianY - neutralY);
+      const deltaLeft = Math.abs(leftData.medianX - neutralX);
+      const deltaRight = Math.abs(rightData.medianX - neutralX);
+
+      // Set personalized sensitivity margins (clamped to safe anatomical bounds)
+      const thresholdUp = Math.max(0.014, Math.min(0.030, deltaUp * 0.50));
+      const thresholdDown = Math.max(0.014, Math.min(0.030, deltaDown * 0.50));
+      const thresholdLeft = Math.max(0.020, Math.min(0.040, deltaLeft * 0.50));
+      const thresholdRight = Math.max(0.020, Math.min(0.040, deltaRight * 0.50));
+      const blinkThresh = Math.max(0.12, Math.min(0.20, neutralEAR * 0.62));
+
+      const finalCalibration: EyeCalibrationData = {
+        neutralEAR,
+        blinkThreshold: blinkThresh,
+        neutralIrisH: neutralX,
+        neutralIrisV: neutralY,
+        upIrisV: upData.medianY,
+        downIrisV: downData.medianY,
+        leftIrisH: leftData.medianX,
+        rightIrisH: rightData.medianX,
+        thresholdH: (thresholdLeft + thresholdRight) / 2,
+        thresholdV: (thresholdUp + thresholdDown) / 2,
+        thresholdUp,
+        thresholdDown,
+        thresholdLeft,
+        thresholdRight,
+        isCalibrated: true,
+        calibrationDate: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      };
+
+      setCalibration(finalCalibration);
+      neutralRunningX.current = neutralX;
+      neutralRunningY.current = neutralY;
+      initFramesCount.current = 0;
+      try {
+        localStorage.setItem('eyeai_calibration', JSON.stringify(finalCalibration));
+        localStorage.setItem('luckydream_eye_calibration', JSON.stringify(finalCalibration));
+      } catch (e) {}
+
+      setCalibrationStep('completed');
+      setCalibrationStage('completed');
+      setCalibrationMessage('Hiệu chỉnh 5 hướng thành công!');
+      speakVietnamese('Hiệu chỉnh 5 hướng thành công');
+
+      await sleep(1800);
+      setCalibrationStep('idle');
+      setCalibrationStage('idle');
+    } catch (err: any) {
+      setCalibrationStage('idle');
+      setCalibrationStep('idle');
+      setCalibrationMessage(err.message || 'Lỗi trong quá trình hiệu chỉnh.');
+      speakVietnamese('Hiệu chỉnh chưa hoàn thành');
+    }
   }, []);
 
+  // Quick 1-point center calibration for backwards compatibility
+  const startCalibration = useCallback(() => {
+    start5PointCalibration();
+  }, [start5PointCalibration]);
+
   const setEyeControlEnabled = useCallback((enabled: boolean) => {
+    localStorage.setItem('luckydream_eye_enabled', String(enabled));
     setSettings(prev => ({ ...prev, eyeControlEnabled: enabled }));
   }, []);
 
@@ -879,7 +1699,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
 
   const [isKeyboardOpen, setKeyboardOpen] = useState(false);
 
-  // Stable Memoized Settings Context Value (Never re-renders during normal eye tracking)
+  // Stable Memoized Settings Context Value
   const settingsContextValue = useMemo<EyeTrackingSettingsContextType>(() => ({
     settings,
     calibration,
@@ -898,11 +1718,20 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     setSpeechRate,
     toggleCamera,
     startCalibration,
+    start5PointCalibration,
+    cancelCalibration,
+    resetCalibration,
+    reZeroCenter,
     calibrationStage,
+    calibrationStep,
     calibrationProgress,
     calibrationMessage,
+    overlaySettings,
+    setOverlaySettings,
     registerGestureCallback,
     triggerManualAction,
+    isVisualizerOpen,
+    setVisualizerOpen,
   }), [
     settings,
     calibration,
@@ -912,8 +1741,11 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     isKeyboardOpen,
     setKeyboardOpen,
     calibrationStage,
+    calibrationStep,
     calibrationProgress,
     calibrationMessage,
+    overlaySettings,
+    setOverlaySettings,
     setEyeControlEnabled,
     setSimulatorMode,
     setSoundFeedback,
@@ -922,11 +1754,17 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     setSpeechRate,
     toggleCamera,
     startCalibration,
+    start5PointCalibration,
+    cancelCalibration,
+    resetCalibration,
+    reZeroCenter,
     registerGestureCallback,
     triggerManualAction,
+    isVisualizerOpen,
+    setVisualizerOpen,
   ]);
 
-  // Throttled Telemetry Context Value (Updates at ~10 FPS only for HUD / SOS)
+  // Throttled Telemetry Context Value
   const telemetryContextValue = useMemo<EyeTrackingTelemetryContextType>(() => ({
     trackingState,
   }), [trackingState]);
@@ -964,7 +1802,6 @@ export function useEyeTrackingTelemetryContext() {
   return ctx;
 }
 
-// Backward compatibility context consumer
 export function useEyeTrackingContext() {
   const settingsCtx = useEyeTrackingSettingsContext();
   const telemetryCtx = useEyeTrackingTelemetryContext();
@@ -973,3 +1810,4 @@ export function useEyeTrackingContext() {
     ...telemetryCtx,
   };
 }
+

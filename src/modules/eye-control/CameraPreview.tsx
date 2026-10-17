@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, memo } from 'react';
 import { useEyeTrackingSettings, useEyeTrackingTelemetry } from './useEyeTracking';
 import { Camera, AlertTriangle } from 'lucide-react';
+import { LiveCameraOverlay } from './LiveCameraOverlay';
 
 interface CameraPreviewProps {
   className?: string;
@@ -46,6 +47,11 @@ export const CameraPreview = memo(function CameraPreview({
         className={`w-full h-full object-cover ${mirrored ? 'transform -scale-x-100' : ''}`}
       />
 
+      {/* Real-time 3D Face Mesh & Iris Tracking Canvas Overlay */}
+      {cameraActive && showOverlay && (
+        <LiveCameraOverlay videoElement={videoRef.current} mirrored={mirrored} />
+      )}
+
       {!cameraActive && !cameraError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-3 bg-slate-900/90 text-white text-xs text-center select-none">
           <Camera className="w-6 h-6 text-[#6AC9F0] animate-pulse mb-1.5" />
@@ -62,11 +68,12 @@ export const CameraPreview = memo(function CameraPreview({
       )}
 
       {cameraActive && showOverlay && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold tracking-wide select-none">
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold tracking-wide select-none backdrop-blur-xs">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          LIVE
+          LIVE AI
         </div>
       )}
     </div>
   );
 });
+

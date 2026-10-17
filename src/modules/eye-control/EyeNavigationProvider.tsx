@@ -9,11 +9,13 @@ interface EyeNavigationContextType {
   registerFocusNode: (node: EyeFocusNode) => void;
   unregisterFocusNode: (id: string) => void;
   setFocusId: (id: string) => void;
-  navigate: (direction: EyeAction) => void;
-  triggerSelect: () => void;
+  navigate: (direction: EyeAction) => boolean;
+  triggerSelect: () => boolean;
   ensureFocusVisible: (id?: string) => void;
   pushFocusScope: (scopeId: string, initialFocusId?: string) => void;
   popFocusScope: (scopeId: string) => void;
+  registerEscapeHandler: (handler: () => boolean | void) => () => void;
+  triggerEscape: () => boolean;
 }
 
 const EyeNavigationContext = createContext<EyeNavigationContextType | undefined>(undefined);
@@ -62,6 +64,16 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
 
   // Map to remember previous focus element before entering each modal scope
   const previousFocusByScopeRef = useRef<Map<string, string | null>>(new Map());
+
+  // Escape handlers stack for custom modal/task rollback
+  const escapeHandlersRef = useRef<Array<() => boolean | void>>([]);
+
+  const registerEscapeHandler = useCallback((handler: () => boolean | void) => {
+    escapeHandlersRef.current.push(handler);
+    return () => {
+      escapeHandlersRef.current = escapeHandlersRef.current.filter(h => h !== handler);
+    };
+  }, []);
 
   // Keep activeFocusIdRef in sync with activeFocusId state
   useEffect(() => {
@@ -177,7 +189,10 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
     if (isExisting) {
       if (nodeMatchesScope) {
         setActiveFocusId(prev => {
-          if (!prev || !nodesRef.current.has(prev)) return node.id;
+          if (!prev || !nodesRef.current.has(prev) || (node.id === 'card-speak' && !currentScope)) {
+            activeFocusIdRef.current = node.id;
+            return node.id;
+          }
           const prevNode = nodesRef.current.get(prev);
           const prevMatches = currentScope ? prevNode?.scopeId === currentScope : !prevNode?.scopeId;
           if (!prevMatches) {
@@ -192,7 +207,7 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
 
     if (nodeMatchesScope) {
       setActiveFocusId(prev => {
-        if (!prev || !nodesRef.current.has(prev)) {
+        if (!prev || !nodesRef.current.has(prev) || (node.id === 'card-speak' && !currentScope)) {
           activeFocusIdRef.current = node.id;
           return node.id;
         }
@@ -258,195 +273,105 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const navigate = useCallback((direction: EyeAction) => {
-    if (direction === 'NONE' || direction === 'SELECT') return;
+  const navigate = useCallback((direction: EyeAction): boolean => {
+    if (direction === 'NONE' || direction === 'SELECT' || direction === 'ESCAPE' || direction === 'DOUBLE_BLINK') return false;
 
     const currentScope = scopeStackRef.current.length > 0
       ? scopeStackRef.current[scopeStackRef.current.length - 1]
       : null;
 
-    // Strict candidate filtering by active scope (modal trap)
+    // Strict candidate filtering by active scope (modal trap) and visibility
     const scopedCandidates = (Array.from(nodesRef.current.values()) as EyeFocusNode[]).filter(
-      node => (currentScope ? node.scopeId === currentScope : !node.scopeId)
+      node => {
+        const scopeMatch = currentScope ? node.scopeId === currentScope : !node.scopeId;
+        if (!scopeMatch || !node.element || !node.element.isConnected) return false;
+        const rect = node.element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
     );
 
-    if (scopedCandidates.length === 0) return;
+    if (scopedCandidates.length === 0) return false;
 
-    setActiveFocusId(currentId => {
-      if (!currentId || !scopedCandidates.some(n => n.id === currentId)) {
-        const sorted = sortNodesByVisualOrder(scopedCandidates);
-        activeFocusIdRef.current = sorted[0].id;
-        return sorted[0].id;
-      }
+    const currentId = activeFocusIdRef.current;
+    if (!currentId || !scopedCandidates.some(n => n.id === currentId)) {
+      const sorted = sortNodesByVisualOrder(scopedCandidates);
+      const first = sorted[0];
+      activeFocusIdRef.current = first.id;
+      setActiveFocusId(first.id);
+      ensureEyeFocusVisible(first.id, nodesRef.current);
+      return true;
+    }
 
-      const currNode = nodesRef.current.get(currentId)!;
+    const currNode = nodesRef.current.get(currentId)!;
+    let targetNode: EyeFocusNode | null = null;
 
-      // Group-based cyclic & nearest-X grid navigation (especially for virtual-keyboard)
-      if (currNode.groupId && currNode.row !== undefined && currNode.col !== undefined) {
-        const sameGroupNodes = scopedCandidates.filter(
-          n => n.groupId === currNode.groupId && n.row !== undefined && n.col !== undefined
-        );
+    // 1. Grid-based navigation (when rows and cols are defined)
+    if (currNode.row !== undefined && currNode.col !== undefined) {
+      const sameGroupCandidates = scopedCandidates.filter(
+        n => n.row !== undefined && n.col !== undefined && (!currNode.groupId || n.groupId === currNode.groupId)
+      );
 
-        if (sameGroupNodes.length > 0) {
-          // Unique sorted rows
-          const rows: number[] = Array.from(new Set(sameGroupNodes.map(n => n.row!))).sort((a, b) => a - b);
-          const currRowIdx = rows.indexOf(currNode.row);
-
-          if (currRowIdx !== -1) {
-            const currRowNodes = sameGroupNodes
-              .filter(n => n.row === currNode.row)
-              .sort((a, b) => a.col! - b.col!);
-
-            const currColIdx = currRowNodes.findIndex(n => n.id === currentId);
-
-            // HORIZONTAL WRAP (NEXT = Right, BACK = Left)
-            if (direction === 'NEXT' || direction === 'BACK') {
-              let targetNode: EyeFocusNode;
-              let isWrap = false;
-
-              if (direction === 'NEXT') {
-                if (currColIdx !== -1 && currColIdx < currRowNodes.length - 1) {
-                  targetNode = currRowNodes[currColIdx + 1];
-                } else {
-                  targetNode = currRowNodes[0];
-                  isWrap = true;
-                }
-              } else { // BACK (Left)
-                if (currColIdx > 0) {
-                  targetNode = currRowNodes[currColIdx - 1];
-                } else {
-                  targetNode = currRowNodes[currRowNodes.length - 1];
-                  isWrap = true;
-                }
+      if (sameGroupCandidates.length > 1) {
+        if (direction === 'NEXT' || direction === 'RIGHT') {
+          const sameRowRight = sameGroupCandidates
+            .filter(n => n.row === currNode.row && n.col! > currNode.col!)
+            .sort((a, b) => a.col! - b.col!);
+          if (sameRowRight.length > 0) {
+            targetNode = sameRowRight[0];
+          }
+        } else if (direction === 'BACK' || direction === 'LEFT') {
+          const sameRowLeft = sameGroupCandidates
+            .filter(n => n.row === currNode.row && n.col! < currNode.col!)
+            .sort((a, b) => b.col! - a.col!);
+          if (sameRowLeft.length > 0) {
+            targetNode = sameRowLeft[0];
+          }
+        } else if (direction === 'DOWN') {
+          const rowsDown = Array.from(new Set(sameGroupCandidates.filter(n => n.row! > currNode.row!).map(n => n.row!))).sort((a, b) => a - b);
+          if (rowsDown.length > 0) {
+            const nextRow = rowsDown[0];
+            const nextRowNodes = sameGroupCandidates.filter(n => n.row === nextRow);
+            let bestColNode = nextRowNodes[0];
+            let minColDiff = Infinity;
+            for (const n of nextRowNodes) {
+              const diff = Math.abs(n.col! - currNode.col!);
+              if (diff < minColDiff) {
+                minColDiff = diff;
+                bestColNode = n;
               }
-
-              if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
-                console.log(`[KEYBOARD][NAV] fromKey: ${currentId}, dir: ${direction}, toKey: ${targetNode.id}, wrap: ${isWrap}`);
-              }
-              activeFocusIdRef.current = targetNode.id;
-              return targetNode.id;
             }
-
-            // VERTICAL WRAP & GEOMETRIC NEAREST-X SELECTION (UP / DOWN)
-            if (direction === 'UP' || direction === 'DOWN') {
-              let targetRowIdx: number;
-              let isWrap = false;
-
-              if (direction === 'UP') {
-                if (currRowIdx > 0) {
-                  targetRowIdx = currRowIdx - 1;
-                } else {
-                  // TOP KEYBOARD ROW + UP: Exit keyboard upward to generic EyeFocusable in active scope
-                  const currRect = currNode.element.getBoundingClientRect();
-                  const currCenter = {
-                    x: currRect.width > 0 ? currRect.left + currRect.width / 2 : window.innerWidth / 2,
-                    y: currRect.height > 0 ? currRect.top + currRect.height / 2 : window.innerHeight,
-                  };
-
-                  const outsideNodes = scopedCandidates.filter(n => n.groupId !== currNode.groupId && n.id !== currentId);
-                  let bestCandidateAbove: EyeFocusNode | null = null;
-                  let minDistance = Infinity;
-
-                  outsideNodes.forEach(node => {
-                    const rect = node.element.getBoundingClientRect();
-                    if (rect.width === 0 || rect.height === 0) return;
-
-                    const center = {
-                      x: rect.left + rect.width / 2,
-                      y: rect.top + rect.height / 2,
-                    };
-
-                    const dy = center.y - currCenter.y;
-                    const dx = center.x - currCenter.x;
-
-                    if (dy < -5) {
-                      const dist = Math.hypot(dx, dy * 0.8);
-                      if (dist < minDistance) {
-                        minDistance = dist;
-                        bestCandidateAbove = node;
-                      }
-                    }
-                  });
-
-                  if (bestCandidateAbove) {
-                    if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
-                      console.log(`[KEYBOARD][NAV] TOP ROW UP -> Exit keyboard to: ${(bestCandidateAbove as EyeFocusNode).id}`);
-                    }
-                    activeFocusIdRef.current = (bestCandidateAbove as EyeFocusNode).id;
-                    return (bestCandidateAbove as EyeFocusNode).id;
-                  }
-
-                  if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
-                    console.log(`[KEYBOARD][NAV] TOP ROW UP -> No candidate above, staying on: ${currentId}`);
-                  }
-                  activeFocusIdRef.current = currentId;
-                  return currentId;
-                }
-              } else { // DOWN
-                if (currRowIdx < rows.length - 1) {
-                  targetRowIdx = currRowIdx + 1;
-                } else {
-                  targetRowIdx = 0;
-                  isWrap = true;
-                }
+            targetNode = bestColNode;
+          }
+        } else if (direction === 'UP') {
+          const rowsUp = Array.from(new Set(sameGroupCandidates.filter(n => n.row! < currNode.row!).map(n => n.row!))).sort((a, b) => b - a);
+          if (rowsUp.length > 0) {
+            const prevRow = rowsUp[0];
+            const prevRowNodes = sameGroupCandidates.filter(n => n.row === prevRow);
+            let bestColNode = prevRowNodes[0];
+            let minColDiff = Infinity;
+            for (const n of prevRowNodes) {
+              const diff = Math.abs(n.col! - currNode.col!);
+              if (diff < minColDiff) {
+                minColDiff = diff;
+                bestColNode = n;
               }
-
-              const targetRowNumber = rows[targetRowIdx];
-              const targetRowNodes = sameGroupNodes.filter(n => n.row === targetRowNumber);
-
-              let currCenterX = 0;
-              let hasDomGeometry = false;
-              const currRect = currNode.element.getBoundingClientRect();
-              if (currRect.width > 0) {
-                currCenterX = currRect.left + currRect.width / 2;
-                hasDomGeometry = true;
-              }
-
-              let bestCandidate: EyeFocusNode = targetRowNodes[0];
-
-              if (hasDomGeometry) {
-                let minDistX = Infinity;
-                for (const candidate of targetRowNodes) {
-                  const candRect = candidate.element.getBoundingClientRect();
-                  const candCenterX = candRect.left + candRect.width / 2;
-                  const distX = Math.abs(candCenterX - currCenterX);
-                  if (distX < minDistX) {
-                    minDistX = distX;
-                    bestCandidate = candidate;
-                  }
-                }
-              } else {
-                const currRatio = (currNode.col! + 0.5) / Math.max(1, currRowNodes.length);
-                let minRatioDiff = Infinity;
-                for (const candidate of targetRowNodes) {
-                  const candRatio = (candidate.col! + 0.5) / Math.max(1, targetRowNodes.length);
-                  const diff = Math.abs(candRatio - currRatio);
-                  if (diff < minRatioDiff) {
-                    minRatioDiff = diff;
-                    bestCandidate = candidate;
-                  }
-                }
-              }
-
-              if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
-                console.log(`[KEYBOARD][NAV] fromKey: ${currentId}, dir: ${direction}, toKey: ${bestCandidate.id}, wrap: ${isWrap}`);
-              }
-              activeFocusIdRef.current = bestCandidate.id;
-              return bestCandidate.id;
             }
+            targetNode = bestColNode;
           }
         }
       }
+    }
 
-      // 2D Spatial bounding box nearest neighbor search on scoped candidates
+    // 2. Spatial 2D Bounding Box Search (if no grid target found or freeform layout)
+    if (!targetNode) {
       const currRect = currNode.element.getBoundingClientRect();
       const currCenter = {
         x: currRect.left + currRect.width / 2,
         y: currRect.top + currRect.height / 2,
       };
 
-      let bestCandidate: EyeFocusNode | null = null;
-      let minDistance = Infinity;
+      let bestSpatialCandidate: EyeFocusNode | null = null;
+      let minScore = Infinity;
 
       scopedCandidates.forEach(node => {
         if (node.id === currentId) return;
@@ -461,78 +386,133 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
         const dx = center.x - currCenter.x;
         const dy = center.y - currCenter.y;
 
-        let isCorrectDirection = false;
-        switch (direction) {
-          case 'NEXT': // Move right
-            isCorrectDirection = dx > 20 && Math.abs(dy) <= Math.abs(dx) * 1.5;
-            break;
-          case 'BACK': // Move left
-            isCorrectDirection = dx < -20 && Math.abs(dy) <= Math.abs(dx) * 1.5;
-            break;
-          case 'DOWN': // Move down
-            isCorrectDirection = dy > 20 && Math.abs(dx) <= Math.abs(dy) * 1.5;
-            break;
-          case 'UP': // Move up
-            isCorrectDirection = dy < -20 && Math.abs(dx) <= Math.abs(dy) * 1.5;
-            break;
+        const overlapY = Math.max(0, Math.min(currRect.bottom, rect.bottom) - Math.max(currRect.top, rect.top));
+        const overlapX = Math.max(0, Math.min(currRect.right, rect.right) - Math.max(currRect.left, rect.left));
+
+        let isValidDir = false;
+        let score = Infinity;
+
+        if (direction === 'NEXT' || direction === 'RIGHT') {
+          if (dx > 4) {
+            isValidDir = overlapY > 0 || Math.abs(dy) <= dx * 2.2;
+            score = overlapY > 0 ? dx * 0.6 : dx + Math.abs(dy) * 1.8;
+          }
+        } else if (direction === 'BACK' || direction === 'LEFT') {
+          if (dx < -4) {
+            isValidDir = overlapY > 0 || Math.abs(dy) <= (-dx) * 2.2;
+            score = overlapY > 0 ? (-dx) * 0.6 : (-dx) + Math.abs(dy) * 1.8;
+          }
+        } else if (direction === 'DOWN') {
+          if (dy > 4) {
+            isValidDir = overlapX > 0 || Math.abs(dx) <= dy * 2.2;
+            score = overlapX > 0 ? dy * 0.6 : dy + Math.abs(dx) * 1.8;
+          }
+        } else if (direction === 'UP') {
+          if (dy < -4) {
+            isValidDir = overlapX > 0 || Math.abs(dx) <= (-dy) * 2.2;
+            score = overlapX > 0 ? (-dy) * 0.6 : (-dy) + Math.abs(dx) * 1.8;
+          }
         }
 
-        if (isCorrectDirection) {
-          const dist = Math.hypot(dx, dy);
-          if (dist < minDistance) {
-            minDistance = dist;
-            bestCandidate = node;
-          }
+        if (isValidDir && score < minScore) {
+          minScore = score;
+          bestSpatialCandidate = node;
         }
       });
 
-      if (bestCandidate) {
-        activeFocusIdRef.current = (bestCandidate as EyeFocusNode).id;
-        return (bestCandidate as EyeFocusNode).id;
+      if (bestSpatialCandidate) {
+        targetNode = bestSpatialCandidate;
       }
+    }
 
-      // Linear cyclic fallback if no spatial node found in directional cone
-      // strictly contained within scopedCandidates
-      const sorted = sortNodesByVisualOrder(scopedCandidates);
-      const currentIndex = sorted.findIndex(n => n.id === currentId);
-      if (currentIndex !== -1) {
-        if (direction === 'NEXT' || direction === 'DOWN') {
-          const nextIndex = (currentIndex + 1) % sorted.length;
-          activeFocusIdRef.current = sorted[nextIndex].id;
-          return sorted[nextIndex].id;
-        } else if (direction === 'BACK' || direction === 'UP') {
-          const prevIndex = (currentIndex - 1 + sorted.length) % sorted.length;
-          activeFocusIdRef.current = sorted[prevIndex].id;
-          return sorted[prevIndex].id;
-        }
-      }
+    // 3. Evaluate Result
+    if (targetNode && targetNode.id !== currentId) {
+      activeFocusIdRef.current = targetNode.id;
+      setActiveFocusId(targetNode.id);
+      ensureEyeFocusVisible(targetNode.id, nodesRef.current);
+      return true; // Successfully moved to a new element!
+    }
 
-      activeFocusIdRef.current = currentId;
-      return currentId;
-    });
+    // No valid element in that direction (boundary reached)
+    return false;
   }, []);
 
-  const triggerSelect = useCallback(() => {
+  const triggerSelect = useCallback((): boolean => {
     const currentScope = scopeStackRef.current.length > 0
       ? scopeStackRef.current[scopeStackRef.current.length - 1]
       : null;
 
-    const currentFocus = activeFocusIdRef.current;
+    let currentFocus = activeFocusIdRef.current;
+
+    // Fallback: if no focus is active, pick the first valid node in scope
+    if (!currentFocus || !nodesRef.current.has(currentFocus)) {
+      const candidates = (Array.from(nodesRef.current.values()) as EyeFocusNode[]).filter(
+        n => (currentScope ? n.scopeId === currentScope : !n.scopeId)
+      );
+      if (candidates.length > 0) {
+        const sorted = sortNodesByVisualOrder(candidates);
+        currentFocus = sorted[0].id;
+        activeFocusIdRef.current = currentFocus;
+        setActiveFocusId(currentFocus);
+        ensureEyeFocusVisible(currentFocus, nodesRef.current);
+      }
+    }
+
     if (currentFocus && nodesRef.current.has(currentFocus)) {
       const node = nodesRef.current.get(currentFocus)!;
       const nodeMatchesScope = currentScope ? node.scopeId === currentScope : !node.scopeId;
       if (nodeMatchesScope) {
         if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
-          console.log(`[KEYBOARD][SELECT] selectedKey: ${currentFocus}, scope: ${currentScope || 'global'}`);
+          console.log(`[EYE NAV][SELECT] selectedNode: ${currentFocus}, scope: ${currentScope || 'global'}`);
         }
         if (node.onSelect) {
           node.onSelect();
         } else {
           node.element.click();
         }
+        return true;
       }
     }
+    return false;
   }, []);
+
+  const triggerEscape = useCallback((): boolean => {
+    if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
+      console.log('[EYE NAV] triggerEscape called (DOUBLE BLINK)');
+    }
+
+    // 1. Run top registered escape handler if available
+    if (escapeHandlersRef.current.length > 0) {
+      const topHandler = escapeHandlersRef.current[escapeHandlersRef.current.length - 1];
+      const handled = topHandler();
+      if (handled !== false) return true;
+    }
+
+    // 2. If inside a modal scope, pop scope
+    if (scopeStackRef.current.length > 0) {
+      const topScope = scopeStackRef.current[scopeStackRef.current.length - 1];
+      popFocusScope(topScope);
+      return true;
+    }
+
+    // 3. Look for explicit Back button in active view
+    const backBtn =
+      document.getElementById('btn-header-back') ||
+      document.getElementById('btn-speak-back') ||
+      document.getElementById('btn-ai-back') ||
+      document.getElementById('btn-chat-back') ||
+      document.getElementById('btn-player-back') ||
+      (document.querySelector('[data-eye-back="true"]') as HTMLElement | null);
+
+    if (backBtn) {
+      backBtn.click();
+      return true;
+    }
+
+    // 4. Dispatch global eyeai:escape event
+    window.dispatchEvent(new CustomEvent('eyeai:escape'));
+    return true;
+  }, [popFocusScope]);
 
   const ensureFocusVisible = useCallback((id?: string) => {
     const targetId = id || activeFocusId;
@@ -566,18 +546,18 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
 
   // Subscribe to gesture actions from EyeTrackingProvider
   useEffect(() => {
-    if (!settings.eyeControlEnabled) return;
-
     const unbind = registerGestureCallback(action => {
       if (action === 'SELECT') {
-        triggerSelect();
+        return triggerSelect();
+      } else if (action === 'ESCAPE' || action === 'DOUBLE_BLINK') {
+        return triggerEscape();
       } else {
-        navigate(action);
+        return navigate(action);
       }
     });
 
     return unbind;
-  }, [registerGestureCallback, navigate, triggerSelect, settings.eyeControlEnabled]);
+  }, [registerGestureCallback, navigate, triggerSelect, triggerEscape]);
 
   const contextValue = useMemo<EyeNavigationContextType>(() => ({
     activeFocusId,
@@ -590,6 +570,8 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
     ensureFocusVisible,
     pushFocusScope,
     popFocusScope,
+    registerEscapeHandler,
+    triggerEscape,
   }), [
     activeFocusId,
     activeScopeId,
@@ -601,6 +583,8 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
     ensureFocusVisible,
     pushFocusScope,
     popFocusScope,
+    registerEscapeHandler,
+    triggerEscape,
   ]);
 
   return (

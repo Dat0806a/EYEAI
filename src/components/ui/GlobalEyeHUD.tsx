@@ -1,7 +1,9 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import { useEyeTrackingSettings, useEyeTrackingTelemetry } from '../../modules/eye-control/useEyeTracking';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Rotate3d, Maximize2, Minimize2, Zap, Clock, Compass } from 'lucide-react';
 import { CameraPreview } from '../../modules/eye-control/CameraPreview';
+import { CameraHub } from '../../modules/eye-control/CameraHub';
+import { FaceMeshVisualizer } from '../../modules/eye-control/FaceMeshVisualizer';
 import { useAuth } from '../../hooks/useAuth';
 
 export interface GlobalEyeHUDProps {
@@ -13,9 +15,18 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
   variant = 'auto',
   currentRoute,
 }: GlobalEyeHUDProps) {
-  const { settings, setEyeControlEnabled, isKeyboardOpen } = useEyeTrackingSettings();
+  const {
+    settings,
+    setEyeControlEnabled,
+    isKeyboardOpen,
+    isVisualizerOpen,
+    setVisualizerOpen,
+    start5PointCalibration,
+  } = useEyeTrackingSettings();
+
   const { trackingState } = useEyeTrackingTelemetry();
   const { profile } = useAuth();
+  const [isHubExpanded, setIsHubExpanded] = useState<boolean>(false);
 
   // Do not render Camera HUD for patient accounts
   if (profile?.account_type === 'patient') {
@@ -78,15 +89,22 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
     faceDetected,
     eyesClosed,
     blinkCount,
+    blinkWindowRemainingMs = 0,
     closedDuration,
+    gazeDirection,
+    cooldownRemainingMs,
+    lastExecutedAction,
   } = trackingState;
 
   // Border glow styling for camera preview
   const borderStyle = !faceDetected
-    ? 'border-slate-300'
+    ? 'border-slate-400'
     : eyesClosed
-    ? 'border-[#FF6F61] shadow-[0_0_8px_rgba(255,111,97,0.4)]'
-    : 'border-[#6AC9F0] shadow-[0_0_8px_rgba(106,201,240,0.4)]';
+    ? 'border-[#FF6F61] shadow-[0_0_8px_rgba(255,111,97,0.5)]'
+    : 'border-[#6AC9F0] shadow-[0_0_8px_rgba(106,201,240,0.5)]';
+
+  const isCooldownActive = cooldownRemainingMs > 0;
+  const cooldownSecs = (cooldownRemainingMs / 1000).toFixed(1);
 
   return (
     <>
@@ -94,50 +112,98 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
         /* LONG HORIZONTAL BAR (Placed directly below header as the first content item) */
         <div
           id="keyboard-eye-hud-bar"
-          className="w-full bg-[#FFF2D6]/98 backdrop-blur-md border-b-2 border-[#14213D]/15 py-2 px-3 sm:px-4 transition-all select-none shadow-xs"
+          className="w-full bg-[#FFF2D6]/98 backdrop-blur-md border-b-2 border-[#14213D]/15 py-1.5 px-3 sm:px-4 transition-all select-none shadow-xs"
         >
-          <div className="max-w-md md:max-w-xl mx-auto w-full flex items-center justify-between gap-2.5">
-            {/* Left: Camera Preview Thumbnail & Status Badge */}
+          <div className="max-w-md md:max-w-xl mx-auto w-full flex items-center justify-between gap-2">
+            {/* Left: Camera Preview Thumbnail & Direction Badge */}
             <div className="flex items-center gap-2 min-w-0">
-              <div className={`relative w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden border-2 bg-slate-900 flex-shrink-0 transition-all duration-150 ${borderStyle}`}>
+              <button
+                type="button"
+                onClick={() => setIsHubExpanded(prev => !prev)}
+                className={`relative w-8 h-8 rounded-full overflow-hidden border-2 bg-slate-900 flex-shrink-0 transition-all duration-150 cursor-pointer ${borderStyle}`}
+                title="Mở Camera Hub đầy đủ"
+              >
                 <CameraPreview className="w-full h-full" mirrored showOverlay={false} />
-              </div>
+              </button>
 
-              <div className="flex items-center gap-2 min-w-0 truncate">
-                <span
-                  className={`text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-tight border whitespace-nowrap ${
-                    !faceDetected
-                      ? 'bg-rose-100 text-rose-800 border-rose-300'
-                      : eyesClosed
-                      ? 'bg-[#FF6F61] text-white border-[#FF6F61] animate-pulse'
-                      : 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                  }`}
-                >
-                  {!faceDetected ? 'Chưa thấy mặt' : eyesClosed ? 'MẮT NHẮM' : 'Đang theo dõi'}
+              <div className="flex items-center gap-1.5 min-w-0 truncate">
+                {/* Gaze Direction Badge */}
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-[#14213D] text-[#6AC9F0] border border-[#6AC9F0]/30 whitespace-nowrap shadow-xs">
+                  {gazeDirection === 'CENTER' && '● TÂM'}
+                  {gazeDirection === 'LEFT' && '← TRÁI'}
+                  {gazeDirection === 'RIGHT' && '→ PHẢI'}
+                  {gazeDirection === 'UP' && '↑ LÊN'}
+                  {gazeDirection === 'DOWN' && '↓ XUỐNG'}
+                  {gazeDirection === 'UNKNOWN' && '? CHƯA RÕ'}
                 </span>
 
-                <span className="text-[10px] sm:text-[11px] font-bold text-[#3B4B68] truncate">
-                  Nháy: <strong className="font-black text-[#14213D]">{blinkCount}</strong>
-                  <span className="mx-1 text-slate-300">-</span>
-                  Nhắm: <strong className={closedDuration > 0 ? "font-black text-[#FF6F61]" : "font-bold text-[#14213D]"}>{closedDuration.toFixed(1)}s</strong>
-                </span>
+                {/* Cooldown / Ready indicator */}
+                {isCooldownActive ? (
+                  <span className="text-[10px] font-black text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300 flex items-center gap-1 whitespace-nowrap">
+                    <Clock className="w-2.5 h-2.5" /> Chờ: {cooldownSecs}s
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1 whitespace-nowrap">
+                    <Zap className="w-2.5 h-2.5 text-emerald-600" /> Sẵn sàng
+                  </span>
+                )}
+
+                {eyesClosed ? (
+                  <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 hidden sm:inline truncate">
+                    Mắt đang nhắm ({closedDuration.toFixed(1)}s)
+                  </span>
+                ) : blinkCount === 2 ? (
+                  <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300 hidden sm:inline truncate shadow-xs">
+                    Chớp: 2 / 2 • ĐÃ CHỌN 🎯
+                  </span>
+                ) : blinkCount === 1 ? (
+                  <span className="text-[10px] font-black text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300 hidden sm:inline truncate animate-pulse shadow-xs">
+                    Chớp: 1 / 2 • Chớp cái 2 trong {(blinkWindowRemainingMs / 1000).toFixed(1)}s!
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold text-[#3B4B68] hidden sm:inline truncate">
+                    Chớp mắt: 0 / 2 (Chớp 2 cái &lt;1.5s để Chọn)
+                  </span>
+                )}
               </div>
             </div>
 
-            {/* Right: Quick Turn Off Camera Button */}
-            <button
-              type="button"
-              onClick={() => setEyeControlEnabled(false)}
-              title="Tắt Camera"
-              className="p-1.5 rounded-full hover:bg-rose-100/80 text-rose-700 transition-colors cursor-pointer flex-shrink-0"
-              aria-label="Tắt Camera"
-            >
-              <EyeOff className="w-4 h-4" />
-            </button>
+            {/* Right: Quick Actions */}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsHubExpanded(prev => !prev)}
+                title={isHubExpanded ? "Thu nhỏ Camera Hub" : "Phóng to Camera Hub"}
+                className="p-1.5 rounded-full hover:bg-[#6AC9F0]/20 text-[#14213D] transition-colors cursor-pointer"
+                aria-label="Toggle Camera Hub"
+              >
+                {isHubExpanded ? <Minimize2 className="w-4 h-4 text-[#14213D]" /> : <Maximize2 className="w-4 h-4 text-[#14213D]" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setVisualizerOpen(true)}
+                title="Xem mạng lưới 3D & Iris tracking"
+                className="p-1.5 rounded-full hover:bg-[#6AC9F0]/20 text-[#14213D] transition-colors cursor-pointer"
+                aria-label="Xem mạng lưới 3D"
+              >
+                <Rotate3d className="w-4 h-4 text-[#14213D]" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setEyeControlEnabled(false)}
+                title="Tắt Camera"
+                className="p-1.5 rounded-full hover:bg-rose-100/80 text-rose-700 transition-colors cursor-pointer"
+                aria-label="Tắt Camera"
+              >
+                <EyeOff className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       ) : (
-        /* FLOATING MINI HUD (Fixed at Bottom-Left when on non-chat screens & keyboard is closed) */
+        /* FLOATING HUD (Bottom-Left) */
         <div
           id="global-eye-hud-floating"
           className="fixed z-[60] pointer-events-none transition-all duration-200 ease-out"
@@ -146,46 +212,128 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
             bottom: 'calc(14px + env(safe-area-inset-bottom))',
           }}
         >
-          <div className="pointer-events-auto bg-[#FFF2D6]/95 backdrop-blur-md border-2 border-[#14213D]/15 shadow-[0_8px_24px_rgba(20,33,61,0.16)] rounded-[20px] p-2 sm:p-2.5 flex items-center justify-between gap-2.5 w-[210px] sm:w-[240px] select-none transition-all duration-200">
-            {/* Left: Compact Camera Preview */}
-            <div className="flex items-center gap-2 min-w-0">
-              <div className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden border-2 bg-slate-900 flex-shrink-0 transition-all duration-150 ${borderStyle}`}>
-                <CameraPreview className="w-full h-full" mirrored showOverlay={false} />
-              </div>
-
-              {/* Status & Telemetry text */}
-              <div className="flex flex-col min-w-0 leading-tight">
-                <span
-                  className={`text-[9px] sm:text-[10px] font-black uppercase tracking-tight ${
-                    !faceDetected
-                      ? 'text-rose-700 font-extrabold'
-                      : eyesClosed
-                      ? 'text-[#FF6F61] font-black animate-pulse'
-                      : 'text-emerald-700 font-black'
-                  }`}
+          {isHubExpanded ? (
+            /* EXPANDED FULL CAMERA HUB CARD */
+            <div className="pointer-events-auto w-[320px] sm:w-[350px] max-w-[calc(100vw-24px)] transition-all">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsHubExpanded(false)}
+                  className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
+                  title="Thu nhỏ Camera Hub"
+                  aria-label="Thu nhỏ"
                 >
-                  {!faceDetected ? 'Chưa thấy mặt' : eyesClosed ? 'MẮT NHẮM' : 'Đang theo dõi'}
-                </span>
-                <span className="text-[10px] font-bold text-[#3B4B68] mt-0.5 truncate">
-                  Nháy {blinkCount} - Nhắm {closedDuration.toFixed(1)}s
-                </span>
+                  <Minimize2 className="w-3.5 h-3.5" />
+                </button>
+                <CameraHub compact={false} />
               </div>
             </div>
+          ) : (
+            /* COMPACT FLOATING PILL */
+            <div className="pointer-events-auto bg-[#FFF2D6]/95 backdrop-blur-md border-2 border-[#14213D]/15 shadow-[0_8px_24px_rgba(20,33,61,0.18)] rounded-[20px] p-2 flex items-center justify-between gap-2 w-[240px] sm:w-[270px] select-none transition-all duration-200">
+              {/* Clickable thumbnail to open full Camera Hub */}
+              <button
+                type="button"
+                onClick={() => setIsHubExpanded(true)}
+                className="flex items-center gap-2 min-w-0 text-left cursor-pointer group"
+                title="Bấm để mở Camera Hub đầy đủ"
+              >
+                <div className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden border-2 bg-slate-900 flex-shrink-0 transition-all duration-150 ${borderStyle}`}>
+                  <CameraPreview className="w-full h-full" mirrored showOverlay={false} />
+                </div>
 
-            {/* Right: Quick Turn Off Camera Button */}
+                <div className="flex flex-col min-w-0 leading-tight">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-black text-[#14213D] truncate">
+                      {gazeDirection === 'CENTER' && '● TÂM'}
+                      {gazeDirection === 'LEFT' && '← TRÁI'}
+                      {gazeDirection === 'RIGHT' && '→ PHẢI'}
+                      {gazeDirection === 'UP' && '↑ LÊN'}
+                      {gazeDirection === 'DOWN' && '↓ XUỐNG'}
+                      {gazeDirection === 'UNKNOWN' && '? CHƯA RÕ'}
+                    </span>
+                    <span className="text-[9px] text-[#0E6C99] font-black group-hover:underline">
+                      (Hub)
+                    </span>
+                  </div>
+
+                  <span className="text-[9px] font-bold text-[#3B4B68] truncate mt-0.5">
+                    {isCooldownActive ? (
+                      <span className="text-amber-700 font-black">Chờ: {cooldownSecs}s</span>
+                    ) : blinkCount === 2 ? (
+                      <span className="text-emerald-700 font-black">Chớp 2/2: Đã Chọn 🎯</span>
+                    ) : blinkCount === 1 ? (
+                      <span className="text-amber-800 font-black animate-pulse">Chớp 1/2 (còn {(blinkWindowRemainingMs / 1000).toFixed(1)}s)</span>
+                    ) : eyesClosed ? (
+                      <span className="text-amber-800 font-black">Nhắm ({closedDuration.toFixed(1)}s)</span>
+                    ) : (
+                      <span className="text-emerald-700 font-black">Chớp: 0/2 Chọn</span>
+                    )}
+                  </span>
+                </div>
+              </button>
+
+              {/* Right: Quick Action Buttons */}
+              <div className="flex items-center gap-0.5 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsHubExpanded(true)}
+                  title="Mở Camera Hub đầy đủ"
+                  className="p-1.5 rounded-full hover:bg-[#6AC9F0]/20 text-[#14213D] transition-colors cursor-pointer"
+                  aria-label="Mở Camera Hub"
+                >
+                  <Maximize2 className="w-3.5 h-3.5 text-[#14213D]" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setVisualizerOpen(true)}
+                  title="Xem mạng lưới 3D & Iris tracking"
+                  className="p-1.5 rounded-full hover:bg-[#6AC9F0]/20 text-[#14213D] transition-colors cursor-pointer"
+                  aria-label="Xem mạng lưới 3D"
+                >
+                  <Rotate3d className="w-3.5 h-3.5 text-[#14213D]" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEyeControlEnabled(false)}
+                  title="Tắt Camera"
+                  className="p-1.5 rounded-full hover:bg-rose-100/80 text-rose-700 transition-colors cursor-pointer"
+                  aria-label="Tắt Camera"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Expanded Modal Camera Hub when on keyboard bar or user toggles on chat routes */}
+      {mode === 'keyboard-bar' && isHubExpanded && (
+        <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm p-4 flex items-center justify-center pointer-events-auto">
+          <div className="relative w-full max-w-sm">
             <button
               type="button"
-              onClick={() => setEyeControlEnabled(false)}
-              title="Tắt Camera"
-              className="p-1.5 rounded-full hover:bg-rose-100/80 text-rose-700 transition-colors cursor-pointer flex-shrink-0"
-              aria-label="Tắt Camera"
+              onClick={() => setIsHubExpanded(false)}
+              className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Đóng Camera Hub"
             >
-              <EyeOff className="w-3.5 h-3.5" />
+              <Minimize2 className="w-4 h-4" />
             </button>
+            <CameraHub compact={false} />
           </div>
         </div>
       )}
+
+      {/* Interactive 3D Face Mesh and Gaze Vector Visualizer Modal */}
+      <FaceMeshVisualizer
+        isOpen={isVisualizerOpen}
+        onClose={() => setVisualizerOpen(false)}
+      />
     </>
   );
 });
+
 

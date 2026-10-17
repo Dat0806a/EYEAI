@@ -38,11 +38,9 @@ Hệ thống cho phép người dùng:
   * **EAR (Eye Aspect Ratio)**: Tính tỷ lệ đóng/mở mắt từ các mốc mi trên và mi dưới.
   * **Iris Ratio Tracking**: Tính tỷ lệ tọa độ con ngươi (Iris Index 468 & 473) so với khóe mắt để xác định hướng nhìn.
 * **Bảng điều khiển cử chỉ mắt**:
-  * **Nháy mắt 1 lần**: `SELECT` (Kích hoạt/Chọn ô đang tô đậm).
-  * **Nháy mắt 2 lần (trong 1.5s)**: `NEXT` (Di chuyển sang phải).
-  * **Nháy mắt 3 lần (trong 3.5s)**: `BACK` (Di chuyển sang trái).
-  * **Nhắm mắt giữ 1.5s - 2.0s**: `DOWN` (Di chuyển xuống hàng dưới).
-  * **Nhắm mắt giữ > 2.5s**: `UP` (Di chuyển lên hàng trên).
+  * **Nháy mắt 1 lần**: `SELECT` (Kích hoạt/Chọn ô đang tô đậm sau 1.5s nếu không nháy tiếp).
+  * **Nháy mắt 2 lần (trong 1.5s)**: `ESCAPE / HỦY THAO TÁC` (Hủy thao tác hiện tại hoặc quay lại màn hình trước).
+  * **Liếc mắt 4 hướng (Trái/Phải/Lên/Xuống)**: Điều hướng tiêu điểm theo không gian 2D.
 
 ### 2.4 Chế Độ Cảm Biến Bàn Phím Giả Lập (Keyboard Simulator)
 * Phục vụ quá trình thử nghiệm/kiểm thử không cần webcam:

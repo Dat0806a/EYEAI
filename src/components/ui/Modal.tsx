@@ -31,16 +31,21 @@ export function Modal({
       ? `modal-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
       : `modal-${autoId.replace(/[^a-z0-9]+/g, '-')}`);
 
-  const { pushFocusScope, popFocusScope } = useEyeNavigationContext();
+  const { pushFocusScope, popFocusScope, registerEscapeHandler } = useEyeNavigationContext();
 
   useEffect(() => {
     if (isOpen && trapEyeFocus) {
       pushFocusScope(modalScopeId);
+      const unbindEscape = registerEscapeHandler?.(() => {
+        onClose();
+        return true;
+      });
       return () => {
+        unbindEscape?.();
         popFocusScope(modalScopeId);
       };
     }
-  }, [isOpen, trapEyeFocus, modalScopeId, pushFocusScope, popFocusScope]);
+  }, [isOpen, trapEyeFocus, modalScopeId, pushFocusScope, popFocusScope, registerEscapeHandler, onClose]);
 
   return (
     <AnimatePresence>
