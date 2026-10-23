@@ -7,12 +7,14 @@ interface CameraPreviewProps {
   className?: string;
   mirrored?: boolean;
   showOverlay?: boolean;
+  showStatusPill?: boolean;
 }
 
 export const CameraPreview = memo(function CameraPreview({
   className = '',
   mirrored = true,
   showOverlay = true,
+  showStatusPill = true,
 }: CameraPreviewProps) {
   const { cameraStream } = useEyeTrackingSettings();
   const { trackingState } = useEyeTrackingTelemetry();
@@ -67,7 +69,7 @@ export const CameraPreview = memo(function CameraPreview({
         </div>
       )}
 
-      {cameraActive && showOverlay && (
+      {cameraActive && showOverlay && showStatusPill && (
         <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold tracking-wide select-none backdrop-blur-xs">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           LIVE AI

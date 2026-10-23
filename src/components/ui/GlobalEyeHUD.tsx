@@ -214,19 +214,8 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
         >
           {isHubExpanded ? (
             /* EXPANDED FULL CAMERA HUB CARD */
-            <div className="pointer-events-auto w-[320px] sm:w-[350px] max-w-[calc(100vw-24px)] transition-all">
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsHubExpanded(false)}
-                  className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
-                  title="Thu nhỏ Camera Hub"
-                  aria-label="Thu nhỏ"
-                >
-                  <Minimize2 className="w-3.5 h-3.5" />
-                </button>
-                <CameraHub compact={false} />
-              </div>
+            <div className="pointer-events-auto w-[330px] sm:w-[360px] max-w-[calc(100vw-24px)] max-h-[calc(100dvh-28px)] flex flex-col transition-all">
+              <CameraHub compact={false} onClose={() => setIsHubExpanded(false)} />
             </div>
           ) : (
             /* COMPACT FLOATING PILL */
@@ -313,16 +302,8 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
       {/* Expanded Modal Camera Hub when on keyboard bar or user toggles on chat routes */}
       {mode === 'keyboard-bar' && isHubExpanded && (
         <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm p-4 flex items-center justify-center pointer-events-auto">
-          <div className="relative w-full max-w-sm">
-            <button
-              type="button"
-              onClick={() => setIsHubExpanded(false)}
-              className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
-              title="Đóng Camera Hub"
-            >
-              <Minimize2 className="w-4 h-4" />
-            </button>
-            <CameraHub compact={false} />
+          <div className="relative w-full max-w-[360px] max-h-[calc(100dvh-32px)] flex flex-col">
+            <CameraHub compact={false} onClose={() => setIsHubExpanded(false)} />
           </div>
         </div>
       )}
