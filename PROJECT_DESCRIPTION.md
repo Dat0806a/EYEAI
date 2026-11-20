@@ -38,16 +38,21 @@ Hệ thống cho phép người dùng:
   * **EAR (Eye Aspect Ratio)**: Tính tỷ lệ đóng/mở mắt từ các mốc mi trên và mi dưới.
   * **Iris Ratio Tracking**: Tính tỷ lệ tọa độ con ngươi (Iris Index 468 & 473) so với khóe mắt để xác định hướng nhìn.
 * **Bảng điều khiển cử chỉ mắt**:
-  * **Nháy mắt 1 lần**: `SELECT` (Kích hoạt/Chọn ô đang tô đậm sau 1.5s nếu không nháy tiếp).
-  * **Nháy mắt 2 lần (trong 1.5s)**: `ESCAPE / HỦY THAO TÁC` (Hủy thao tác hiện tại hoặc quay lại màn hình trước).
+  * **Nháy mắt 1 lần**: `DOWN` (Di chuyển tiêu điểm xuống dưới sau 0.7s nếu không nháy tiếp).
+  * **Nháy mắt 2 lần (trong 0.7s)**: `SELECT` (Kích hoạt / Chọn ô đang tô đậm).
+  * **Nháy mắt 3 lần (trong 0.7s)**: `EMERGENCY` (Kích hoạt cuộc gọi khẩn cấp SOS tới y tế & người thân).
   * **Liếc mắt 4 hướng (Trái/Phải/Lên/Xuống)**: Điều hướng tiêu điểm theo không gian 2D.
 
 ### 2.4 Chế Độ Cảm Biến Bàn Phím Giả Lập (Keyboard Simulator)
 * Phục vụ quá trình thử nghiệm/kiểm thử không cần webcam:
-  * Phím mũi tên `→`: Di chuyển tới (Next).
-  * Phím mũi tên `←`: Di chuyển lùi (Back).
+  * Phím mũi tên `→`: Di chuyển sang phải (Right).
+  * Phím mũi tên `←`: Di chuyển sang trái (Left).
   * Phím mũi tên `↓`: Di chuyển xuống (Down).
   * Phím mũi tên `↑`: Di chuyển lên (Up).
+  * Phím `Space`: Nhấn 1 lần = Xuống, 2 lần = Chọn, 3 lần = Gọi khẩn cấp.
+  * Phím `Enter`: Chọn (Select).
+  * Phím `F1`: Kích hoạt cuộc gọi khẩn cấp (Emergency Call).
+  * Phím `Escape`: Hủy thao tác / Quay lại.
   * Phím `Enter`: Chọn phím (Select).
 
 ---

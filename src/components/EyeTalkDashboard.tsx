@@ -635,10 +635,10 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
         faceDetected: true
       }));
     } else {
-      const BLINK_DECISION_WINDOW_MS = 650;
+      const BLINK_DECISION_WINDOW_MS = 700;
 
-      // Check expiration of window for 2nd blink:
-      // If user blinked 1 time and did NOT blink again within 650ms, trigger DOWN (Con trỏ xuống dưới)!
+      // 1. Check expiration of window for 1st blink:
+      // If user blinked 1 time and did NOT blink again within 700ms, trigger DOWN (Con trỏ xuống dưới)!
       if (blinkCountInGesture.current === 1) {
         const elapsedSinceFirstBlink = now - firstBlinkTime.current;
         if (elapsedSinceFirstBlink >= BLINK_DECISION_WINDOW_MS && !isClosedNow && !isEyesClosed.current) {
@@ -658,6 +658,33 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
             faceDetected: true,
             blinkCount: 1
           }));
+        }
+      }
+
+      // 2. Check expiration of window for 2nd blink:
+      // If user blinked 2 times and did NOT blink 3rd time within 700ms, trigger SELECT (Chọn)!
+      if (blinkCountInGesture.current === 2) {
+        const elapsedSinceSecondBlink = now - lastBlinkEndTime.current;
+        if (elapsedSinceSecondBlink >= BLINK_DECISION_WINDOW_MS && !isClosedNow && !isEyesClosed.current) {
+          blinkCountInGesture.current = 0;
+          firstBlinkTime.current = 0;
+          lastBlinkEndTime.current = now;
+          selectSuccessUntil.current = now + 1200;
+          cooldownTimer.current = 2500;
+          triggerSelection();
+
+          const selectedItem = grid[focusedRowRef.current]?.[focusedColRef.current];
+          const speakText = selectedItem ? `Chọn ${selectedItem.label}` : 'Chọn';
+
+          setTrackingState(prev => ({
+            ...prev,
+            lastActionTriggered: `🎯 CHỌN (Chớp mắt 2 cái) - ${new Date().toLocaleTimeString()}`,
+            currentAction: 'SELECT',
+            actionProgress: 100,
+            faceDetected: true,
+            blinkCount: 2
+          }));
+          speakVietnamese(speakText);
         }
       }
 
@@ -693,31 +720,40 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
             if (blinkCountInGesture.current === 0) {
               blinkCountInGesture.current = 1;
               firstBlinkTime.current = now;
+              lastBlinkEndTime.current = now;
             } else if (blinkCountInGesture.current === 1) {
-              const interval = now - firstBlinkTime.current;
+              const interval = now - lastBlinkEndTime.current;
               if (interval <= BLINK_DECISION_WINDOW_MS + 250) {
-                // DOUBLE-BLINK SELECT!
-                blinkCountInGesture.current = 0;
-                firstBlinkTime.current = 0;
-                selectSuccessUntil.current = now + 1200;
-                cooldownTimer.current = 2500;
-                triggerSelection();
-
-                const selectedItem = grid[focusedRowRef.current]?.[focusedColRef.current];
-                const speakText = selectedItem ? `Chọn ${selectedItem.label}` : 'Chọn';
-
-                setTrackingState(prev => ({
-                  ...prev,
-                  lastActionTriggered: `🎯 CHỌN (Chớp mắt 2 cái) - ${new Date().toLocaleTimeString()}`,
-                  currentAction: 'SELECT',
-                  actionProgress: 100,
-                  faceDetected: true,
-                  blinkCount: 2
-                }));
-                speakVietnamese(speakText);
+                blinkCountInGesture.current = 2;
+                lastBlinkEndTime.current = now;
               } else {
                 blinkCountInGesture.current = 1;
                 firstBlinkTime.current = now;
+                lastBlinkEndTime.current = now;
+              }
+            } else if (blinkCountInGesture.current === 2) {
+              // TRIPLE-BLINK EMERGENCY!
+              const interval = now - lastBlinkEndTime.current;
+              if (interval <= BLINK_DECISION_WINDOW_MS + 250) {
+                blinkCountInGesture.current = 0;
+                firstBlinkTime.current = 0;
+                lastBlinkEndTime.current = now;
+                cooldownTimer.current = 3000;
+                window.dispatchEvent(new CustomEvent('eyeai:emergency'));
+                speakVietnamese('Kích hoạt cuộc gọi khẩn cấp');
+
+                setTrackingState(prev => ({
+                  ...prev,
+                  lastActionTriggered: `🚨 GỌI KHẨN CẤP (Nháy mắt 3 cái) - ${new Date().toLocaleTimeString()}`,
+                  currentAction: 'EMERGENCY',
+                  actionProgress: 100,
+                  faceDetected: true,
+                  blinkCount: 3
+                }));
+              } else {
+                blinkCountInGesture.current = 1;
+                firstBlinkTime.current = now;
+                lastBlinkEndTime.current = now;
               }
             }
           } else if (blinkDuration > 800) {
@@ -734,10 +770,24 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
             rawEAR: metrics.avgEAR,
             directionH: 'CENTER',
             directionV: 'CENTER',
+            currentAction: 'DOWN',
+            actionProgress: Math.min(100, Math.round((remainingMs / BLINK_DECISION_WINDOW_MS) * 100)),
+            lastActionTriggered: `Đã chớp 1/3 (chờ ${remainingSecs}s ➔ Xuống ↓, hoặc chớp tiếp: 2=Chọn, 3=Khẩn cấp)...`,
+            blinkCount: 1,
+            faceDetected: true
+          }));
+        } else if (blinkCountInGesture.current === 2) {
+          const remainingMs = Math.max(0, BLINK_DECISION_WINDOW_MS - (now - lastBlinkEndTime.current));
+          const remainingSecs = (remainingMs / 1000).toFixed(1);
+          setTrackingState(prev => ({
+            ...prev,
+            rawEAR: metrics.avgEAR,
+            directionH: 'CENTER',
+            directionV: 'CENTER',
             currentAction: 'SELECT',
             actionProgress: Math.min(100, Math.round((remainingMs / BLINK_DECISION_WINDOW_MS) * 100)),
-            lastActionTriggered: `Đã chớp 1 cái (chờ ${remainingSecs}s để Xuống dưới ↓, hoặc chớp tiếp để Chọn 🎯)...`,
-            blinkCount: 1,
+            lastActionTriggered: `Đã chớp 2/3 (chờ ${remainingSecs}s ➔ Chọn 🎯, hoặc chớp cái thứ 3 ➔ Khẩn cấp 🚨)...`,
+            blinkCount: 2,
             faceDetected: true
           }));
         } else {

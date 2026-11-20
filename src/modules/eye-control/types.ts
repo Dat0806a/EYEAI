@@ -8,6 +8,7 @@ export type EyeAction =
   | 'SELECT'
   | 'ESCAPE'
   | 'DOUBLE_BLINK'
+  | 'EMERGENCY'
   | 'NONE';
 
 export type GazeDirection = 'CENTER' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'UNKNOWN';

@@ -42,7 +42,7 @@ export const SosHeroCard = memo(function SosHeroCard({
               SOS KHẨN CẤP
             </h3>
             <p className="text-xs sm:text-sm text-white/95 font-bold mt-0.5 leading-snug">
-              Báo động & Gọi khẩn cấp trong 8 giây
+              Nháy mắt 3 lần để gọi khẩn cấp ngay
             </p>
           </div>
         </div>
@@ -50,7 +50,7 @@ export const SosHeroCard = memo(function SosHeroCard({
         {/* Right Quick Action Beacon */}
         <div className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white text-[#FF6F61] font-black text-xs shadow-md flex-shrink-0">
           <PhoneCall className="w-4 h-4 text-[#FF6F61]" />
-          <span>GỌI 115 / BS</span>
+          <span>GỌI 115 / BS (Nháy 3 lần)</span>
         </div>
       </motion.div>
     </EyeFocusable>

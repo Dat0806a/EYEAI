@@ -547,7 +547,10 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
   // Subscribe to gesture actions from EyeTrackingProvider
   useEffect(() => {
     const unbind = registerGestureCallback(action => {
-      if (action === 'SELECT') {
+      if (action === 'EMERGENCY') {
+        window.dispatchEvent(new CustomEvent('eyeai:emergency'));
+        return true;
+      } else if (action === 'SELECT') {
         return triggerSelect();
       } else if (action === 'ESCAPE' || action === 'DOUBLE_BLINK') {
         return triggerEscape();

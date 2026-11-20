@@ -24,6 +24,7 @@ import {
   Crosshair,
   Eye,
   Minimize2,
+  PhoneCall,
 } from 'lucide-react';
 
 interface CameraHubProps {
@@ -124,7 +125,8 @@ export const CameraHub = memo(function CameraHub({
     { action: 'RIGHT', label: 'SANG PHẢI', icon: <ArrowRight className="w-4 h-4 flex-shrink-0" />, keyHint: 'Liếc phải' },
     { action: 'UP', label: 'LÊN', icon: <ArrowUp className="w-4 h-4 flex-shrink-0" />, keyHint: 'Liếc lên' },
     { action: 'DOWN', label: 'XUỐNG', icon: <ArrowDown className="w-4 h-4 flex-shrink-0" />, keyHint: 'Chớp 1 cái' },
-    { action: 'SELECT', label: 'CHỌN', icon: <Check className="w-4 h-4 flex-shrink-0" />, keyHint: 'Chớp 2 cái', span: 'col-span-2' },
+    { action: 'SELECT', label: 'CHỌN', icon: <Check className="w-4 h-4 flex-shrink-0" />, keyHint: 'Chớp 2 cái' },
+    { action: 'EMERGENCY', label: 'GỌI KHẨN CẤP', icon: <PhoneCall className="w-4 h-4 flex-shrink-0 text-rose-400" />, keyHint: 'Chớp 3 cái' },
   ];
 
   const cooldownSecs = (cooldownRemainingMs / 1000).toFixed(1);
@@ -249,22 +251,24 @@ export const CameraHub = memo(function CameraHub({
           <div
             id="hub-blink-counter-badge"
             className={`absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full backdrop-blur-md border shadow-lg transition-all duration-200 select-none ${
-              blinkCount === 2
-                ? 'bg-emerald-950/95 border-emerald-400 text-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.6)] scale-105'
+              blinkCount === 3
+                ? 'bg-rose-950/95 border-rose-400 text-rose-300 shadow-[0_0_20px_rgba(244,63,94,0.7)] scale-105 animate-pulse'
+                : blinkCount === 2
+                ? 'bg-emerald-950/95 border-emerald-400 text-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.6)]'
                 : blinkCount === 1
                 ? 'bg-amber-950/95 border-amber-400 text-amber-300 shadow-[0_0_14px_rgba(251,191,36,0.6)] ring-2 ring-amber-400/40 animate-pulse'
                 : 'bg-slate-900/85 border-slate-700/80 text-slate-200'
             }`}
           >
             <Eye className={`w-3.5 h-3.5 ${
-              blinkCount === 2 ? 'text-emerald-400' : blinkCount === 1 ? 'text-amber-400 animate-bounce' : 'text-[#6AC9F0]'
+              blinkCount === 3 ? 'text-rose-400 animate-bounce' : blinkCount === 2 ? 'text-emerald-400' : blinkCount === 1 ? 'text-amber-400 animate-bounce' : 'text-[#6AC9F0]'
             }`} />
             <span className="text-[11px] font-black tracking-wide">
               CHỚP:{' '}
               <span className={`text-xs font-mono font-black ${
-                blinkCount === 2 ? 'text-emerald-400' : blinkCount === 1 ? 'text-amber-400' : 'text-[#6AC9F0]'
+                blinkCount === 3 ? 'text-rose-400' : blinkCount === 2 ? 'text-emerald-400' : blinkCount === 1 ? 'text-amber-400' : 'text-[#6AC9F0]'
               }`}>
-                {blinkCount} / 2
+                {blinkCount} / 3
               </span>
             </span>
 
@@ -275,8 +279,14 @@ export const CameraHub = memo(function CameraHub({
             )}
 
             {blinkCount === 2 && (
-              <span className="text-[9px] font-black text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded-full border border-emerald-400/30 uppercase">
-                CHỌN 🎯
+              <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded-full border border-emerald-400/30">
+                {(blinkWindowRemainingMs / 1000).toFixed(1)}s ➔ Chọn 🎯
+              </span>
+            )}
+
+            {blinkCount === 3 && (
+              <span className="text-[9px] font-black text-rose-300 bg-rose-500/20 px-1.5 py-0.5 rounded-full border border-rose-400/30 uppercase animate-pulse">
+                GỌI KHẨN CẤP 🚨
               </span>
             )}
           </div>
@@ -441,7 +451,9 @@ export const CameraHub = memo(function CameraHub({
         <div
           id="camera-hub-blink-panel"
           className={`p-3 rounded-2xl border transition-all duration-200 ${
-            blinkCount === 2
+            blinkCount === 3
+              ? 'bg-rose-950/40 border-rose-400/80 shadow-[0_0_18px_rgba(244,63,94,0.3)]'
+              : blinkCount === 2
               ? 'bg-emerald-950/40 border-emerald-400/80 shadow-[0_0_18px_rgba(52,211,153,0.25)]'
               : blinkCount === 1
               ? 'bg-amber-950/40 border-amber-400/80 shadow-[0_0_18px_rgba(251,191,36,0.25)]'
@@ -456,14 +468,22 @@ export const CameraHub = memo(function CameraHub({
             </span>
             <span
               className={`text-[10px] font-black px-2 py-0.5 rounded-full border uppercase whitespace-nowrap flex-shrink-0 ${
-                blinkCount === 2
+                blinkCount === 3
+                  ? 'bg-rose-500/20 text-rose-400 border-rose-400/40 animate-pulse'
+                  : blinkCount === 2
                   ? 'bg-emerald-500/20 text-emerald-400 border-emerald-400/40'
                   : blinkCount === 1
                   ? 'bg-amber-500/20 text-amber-400 border-amber-400/40 animate-pulse'
                   : 'bg-slate-800 text-slate-400 border-slate-700'
               }`}
             >
-              {blinkCount === 2 ? 'ĐÃ CHỌN 🎯' : blinkCount === 1 ? `1: XUỐNG ↓ (${(blinkWindowRemainingMs / 1000).toFixed(1)}s)` : 'CHỜ CHỚP MẮT'}
+              {blinkCount === 3
+                ? 'GỌI KHẨN CẤP 🚨'
+                : blinkCount === 2
+                ? `2: CHỌN 🎯 (${(blinkWindowRemainingMs / 1000).toFixed(1)}s)`
+                : blinkCount === 1
+                ? `1: XUỐNG ↓ (${(blinkWindowRemainingMs / 1000).toFixed(1)}s)`
+                : 'CHỜ CHỚP MẮT'}
             </span>
           </div>
 
@@ -471,39 +491,50 @@ export const CameraHub = memo(function CameraHub({
           <div className="flex items-center gap-2.5">
             <div
               className={`w-11 h-11 rounded-xl flex items-center justify-center font-black text-sm font-mono flex-shrink-0 transition-colors shadow-sm ${
-                blinkCount === 2
+                blinkCount === 3
+                  ? 'bg-rose-500 text-white animate-pulse'
+                  : blinkCount === 2
                   ? 'bg-emerald-400 text-slate-950'
                   : blinkCount === 1
                   ? 'bg-amber-400 text-slate-950 animate-pulse'
                   : 'bg-slate-800 text-[#6AC9F0] border border-slate-700'
               }`}
             >
-              {blinkCount === 2 ? '✓' : `${blinkCount}/2`}
+              {blinkCount === 3 ? '🚨' : blinkCount === 2 ? '✓' : `${blinkCount}/3`}
             </div>
 
             <div className="min-w-0 flex-1">
               <p className="text-[11px] text-slate-300 leading-snug">
-                {blinkCount === 0 && 'Chớp 1 cái: Xuống dưới ↓ • Chớp 2 cái: Chọn 🎯'}
+                {blinkCount === 0 && 'Chớp 1 cái: Xuống ↓ • Chớp 2 cái: Chọn 🎯 • Chớp 3 cái: Gọi khẩn cấp 🚨'}
                 {blinkCount === 1 && (
                   <span className="text-amber-300 font-bold">
-                    Đã chớp 1 cái! Chờ {(blinkWindowRemainingMs / 1000).toFixed(1)}s để Xuống ↓, hoặc chớp tiếp để Chọn 🎯
+                    Đã chớp 1 cái! Chờ {(blinkWindowRemainingMs / 1000).toFixed(1)}s để Xuống ↓, hoặc chớp tiếp (2: Chọn, 3: Gọi khẩn cấp)
                   </span>
                 )}
                 {blinkCount === 2 && (
                   <span className="text-emerald-300 font-bold">
-                    Đã chớp 2 cái: Thực hiện thao tác Chọn thành công! 🎯
+                    Đã chớp 2 cái! Chờ {(blinkWindowRemainingMs / 1000).toFixed(1)}s để Chọn 🎯, hoặc chớp cái thứ 3 để Gọi khẩn cấp 🚨
+                  </span>
+                )}
+                {blinkCount === 3 && (
+                  <span className="text-rose-300 font-bold">
+                    Đã chớp 3 cái: Kích hoạt cuộc gọi khẩn cấp thành công! 🚨
                   </span>
                 )}
               </p>
             </div>
           </div>
 
-          {/* 1.5s Countdown progress bar */}
-          {blinkCount === 1 && (
+          {/* Countdown progress bar */}
+          {(blinkCount === 1 || blinkCount === 2) && (
             <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-2.5 border border-slate-700/50">
               <div
-                className="h-full bg-gradient-to-r from-amber-400 to-amber-500 transition-all duration-75"
-                style={{ width: `${Math.min(100, Math.max(0, (blinkWindowRemainingMs / 1500) * 100))}%` }}
+                className={`h-full transition-all duration-75 ${
+                  blinkCount === 2
+                    ? 'bg-gradient-to-r from-emerald-400 to-emerald-500'
+                    : 'bg-gradient-to-r from-amber-400 to-amber-500'
+                }`}
+                style={{ width: `${Math.min(100, Math.max(0, (blinkWindowRemainingMs / 700) * 100))}%` }}
               />
             </div>
           )}
@@ -569,8 +600,8 @@ export const CameraHub = memo(function CameraHub({
 
           <div className="bg-slate-900/60 rounded-xl p-2.5 border border-slate-800/70">
             <span className="text-slate-400 block text-[10px]">Trạng thái mắt</span>
-            <span className={`font-black truncate block ${eyesClosed ? 'text-[#FF6F61]' : blinkCount === 1 ? 'text-amber-400' : blinkCount === 2 ? 'text-emerald-400' : 'text-[#6AC9F0]'}`}>
-              {eyesClosed ? `NHẮM (${closedDuration.toFixed(1)}s)` : blinkCount === 2 ? 'CHỚP: 2/2 (CHỌN)' : blinkCount === 1 ? `CHỚP: 1/2 (${(blinkWindowRemainingMs / 1000).toFixed(1)}s)` : 'MỞ (Chớp 2 cái Chọn)'}
+            <span className={`font-black truncate block ${eyesClosed ? 'text-[#FF6F61]' : blinkCount === 3 ? 'text-rose-400' : blinkCount === 2 ? 'text-emerald-400' : blinkCount === 1 ? 'text-amber-400' : 'text-[#6AC9F0]'}`}>
+              {eyesClosed ? `NHẮM (${closedDuration.toFixed(1)}s)` : blinkCount === 3 ? 'CHỚP: 3/3 (GỌI CẤP CỨU)' : blinkCount === 2 ? 'CHỚP: 2/3 (CHỌN)' : blinkCount === 1 ? `CHỚP: 1/3 (${(blinkWindowRemainingMs / 1000).toFixed(1)}s)` : 'MỞ (Chớp 1: Xuống, 2: Chọn, 3: SOS)'}
             </span>
           </div>
 

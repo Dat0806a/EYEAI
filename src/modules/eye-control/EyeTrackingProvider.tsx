@@ -277,6 +277,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
           UP: 'Lên',
           ESCAPE: 'Hủy thao tác',
           DOUBLE_BLINK: 'Hủy thao tác',
+          EMERGENCY: 'Kích hoạt cuộc gọi khẩn cấp',
           NONE: '',
         };
         const soundText = soundMap[action];
@@ -284,10 +285,16 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
           speakVietnamese(soundText);
         }
       } else {
-        if (['RIGHT', 'NEXT', 'LEFT', 'BACK', 'UP', 'DOWN'].includes(action)) {
+        if (action === 'EMERGENCY') {
+          speakVietnamese('Kích hoạt cuộc gọi khẩn cấp');
+        } else if (['RIGHT', 'NEXT', 'LEFT', 'BACK', 'UP', 'DOWN'].includes(action)) {
           speakVietnamese('Không có phần tử theo hướng này');
         }
       }
+    }
+
+    if (action === 'EMERGENCY') {
+      window.dispatchEvent(new CustomEvent('eyeai:emergency'));
     }
 
     return executed;
@@ -361,13 +368,14 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   const reArmedRef = useRef<boolean>(true);
   const centerStabilityStart = useRef<number>(0);
 
-  // Double-Blink state machine refs (2 blinks in <= 1.5s = SELECT)
+  // Triple-Blink state machine refs (1 blink: DOWN, 2 blinks: SELECT, 3 blinks: EMERGENCY)
   const isEyesClosed = useRef<boolean>(false);
   const closeStartTime = useRef<number | null>(null);
   const blinkCountInGesture = useRef<number>(0);
   const firstBlinkTime = useRef<number>(0);
   const lastBlinkEndTime = useRef<number>(0);
   const selectSuccessUntil = useRef<number>(0);
+  const emergencySuccessUntil = useRef<number>(0);
 
   // Command Arbiter Cooldown ref (1000ms standard)
   const cooldownTimer = useRef<number>(0);
@@ -509,10 +517,10 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     let actionTriggeredThisFrame: EyeAction = 'NONE';
     let actionProg = 0;
 
-    const BLINK_DECISION_WINDOW_MS = 650; // 650ms window to decide between 1 blink (DOWN) and 2 blinks (SELECT)
+    const BLINK_DECISION_WINDOW_MS = 700; // 700ms window to decide between 1 blink (DOWN), 2 blinks (SELECT), and 3 blinks (EMERGENCY)
 
-    // Check expiration of window for 2nd blink:
-    // If user blinked 1 time and did NOT blink again within 650ms -> Trigger DOWN (Xuống dưới)!
+    // 1. Check expiration of window for 1st blink:
+    // If user blinked 1 time and did NOT blink again within 700ms -> Trigger DOWN (Xuống dưới)!
     if (blinkCountInGesture.current === 1) {
       const elapsedSinceFirstBlink = now - firstBlinkTime.current;
       if (elapsedSinceFirstBlink >= BLINK_DECISION_WINDOW_MS && !isClosedNow && !isEyesClosed.current) {
@@ -564,6 +572,60 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // 2. Check expiration of window for 2nd blink:
+    // If user blinked 2 times and did NOT blink 3rd time within 700ms -> Trigger SELECT (Chọn)!
+    if (blinkCountInGesture.current === 2) {
+      const elapsedSinceSecondBlink = now - lastBlinkEndTime.current;
+      if (elapsedSinceSecondBlink >= BLINK_DECISION_WINDOW_MS && !isClosedNow && !isEyesClosed.current) {
+        blinkCountInGesture.current = 0;
+        firstBlinkTime.current = 0;
+        lastBlinkEndTime.current = now;
+        selectSuccessUntil.current = now + 1200; // Keep showing 2 / 3 on UI for 1.2s
+
+        const executed = dispatchAction('SELECT');
+        const nowTs = performance.now();
+        cooldownTimer.current = ACTION_COOLDOWN_MS; // 2.5s cooldown
+        actionTriggeredThisFrame = 'SELECT';
+        lastExecutedActionRef.current = 'SELECT';
+        lastExecutedTimestampRef.current = nowTs;
+        reArmedRef.current = false;
+
+        smoothGazeX.current = 0;
+        smoothGazeY.current = 0;
+        gazeDirState.current = 'CENTER';
+        currentGazeCandidate.current = 'CENTER';
+        gazeDwellStart.current = 0;
+        gazeFiredInThisLook.current = false;
+        centerStabilityStart.current = 0;
+
+        const updatedSelect: EyeTrackingState = {
+          ...latestTelemetryRef.current,
+          rawEAR: parseFloat(metrics.avgEAR.toFixed(3)),
+          blinkThreshold: parseFloat(blinkThresh.toFixed(3)),
+          baselineEAR: parseFloat(openBaselineEAR.toFixed(3)),
+          lastActionTriggered: executed ? 'SELECT (Chớp mắt 2 cái - Đã Chọn 🎯)' : 'Chưa có phần tử được chọn',
+          currentAction: 'SELECT',
+          lastExecutedAction: 'SELECT',
+          lastExecutedTimestamp: nowTs,
+          gazeDirection: 'CENTER',
+          directionH: 'CENTER',
+          directionV: 'CENTER',
+          gazeX: 0,
+          gazeY: 0,
+          rawGazeX: 0,
+          rawGazeY: 0,
+          blinkCount: 2,
+          blinkWindowRemainingMs: 0,
+          closedDuration: 0,
+          actionProgress: 100,
+          cooldownRemainingMs: ACTION_COOLDOWN_MS,
+          cooldownTotalMs: ACTION_COOLDOWN_MS,
+        };
+        latestTelemetryRef.current = updatedSelect;
+        setTrackingState(updatedSelect);
+      }
+    }
+
     if (isClosedNow) {
       // While eyes are closing or closed, gaze is strictly locked at CENTER
       smoothGazeX.current = 0;
@@ -606,20 +668,34 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
             // First blink registered!
             blinkCountInGesture.current = 1;
             firstBlinkTime.current = now;
+            lastBlinkEndTime.current = now;
           } else if (blinkCountInGesture.current === 1) {
             // Second blink registered!
-            const interval = now - firstBlinkTime.current;
+            const interval = now - lastBlinkEndTime.current;
             if (interval <= BLINK_DECISION_WINDOW_MS + 250) {
-              // Valid Double-Blink within window -> Trigger SELECT!
+              blinkCountInGesture.current = 2;
+              lastBlinkEndTime.current = now;
+            } else {
+              // Exceeded window: Start new cycle with this blink as #1
+              blinkCountInGesture.current = 1;
+              firstBlinkTime.current = now;
+              lastBlinkEndTime.current = now;
+            }
+          } else if (blinkCountInGesture.current === 2) {
+            // Third blink registered! IMMEDIATELY TRIGGER EMERGENCY CALL!
+            const interval = now - lastBlinkEndTime.current;
+            if (interval <= BLINK_DECISION_WINDOW_MS + 250) {
               blinkCountInGesture.current = 0;
               firstBlinkTime.current = 0;
-              selectSuccessUntil.current = now + 1200; // Keep showing 2 / 2 on UI for 1.2s
+              lastBlinkEndTime.current = now;
+              emergencySuccessUntil.current = now + 2000; // Keep showing 3 / 3 on UI for 2s
 
-              const executed = dispatchAction('SELECT');
+              const executed = dispatchAction('EMERGENCY');
+              window.dispatchEvent(new CustomEvent('eyeai:emergency'));
               const nowTs = performance.now();
-              cooldownTimer.current = ACTION_COOLDOWN_MS; // 2.5s cooldown
-              actionTriggeredThisFrame = 'SELECT';
-              lastExecutedActionRef.current = 'SELECT';
+              cooldownTimer.current = ACTION_COOLDOWN_MS + 500; // 3.0s cooldown
+              actionTriggeredThisFrame = 'EMERGENCY';
+              lastExecutedActionRef.current = 'EMERGENCY';
               lastExecutedTimestampRef.current = nowTs;
               reArmedRef.current = false;
 
@@ -632,14 +708,14 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
               gazeFiredInThisLook.current = false;
               centerStabilityStart.current = 0;
 
-              const updatedSelect: EyeTrackingState = {
+              const updatedEmergency: EyeTrackingState = {
                 ...latestTelemetryRef.current,
                 rawEAR: parseFloat(metrics.avgEAR.toFixed(3)),
                 blinkThreshold: parseFloat(blinkThresh.toFixed(3)),
                 baselineEAR: parseFloat(openBaselineEAR.toFixed(3)),
-                lastActionTriggered: executed ? 'SELECT (Chớp mắt 2 cái - Đã Chọn)' : 'Chưa có phần tử được chọn',
-                currentAction: 'SELECT',
-                lastExecutedAction: 'SELECT',
+                lastActionTriggered: 'EMERGENCY (Nháy mắt 3 lần - Kích hoạt gọi khẩn cấp 🚨)',
+                currentAction: 'EMERGENCY',
+                lastExecutedAction: 'EMERGENCY',
                 lastExecutedTimestamp: nowTs,
                 gazeDirection: 'CENTER',
                 directionH: 'CENTER',
@@ -648,19 +724,20 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
                 gazeY: 0,
                 rawGazeX: 0,
                 rawGazeY: 0,
-                blinkCount: 2,
+                blinkCount: 3,
                 blinkWindowRemainingMs: 0,
                 closedDuration: 0,
                 actionProgress: 100,
-                cooldownRemainingMs: ACTION_COOLDOWN_MS,
-                cooldownTotalMs: ACTION_COOLDOWN_MS,
+                cooldownRemainingMs: ACTION_COOLDOWN_MS + 500,
+                cooldownTotalMs: ACTION_COOLDOWN_MS + 500,
               };
-              latestTelemetryRef.current = updatedSelect;
-              setTrackingState(updatedSelect);
+              latestTelemetryRef.current = updatedEmergency;
+              setTrackingState(updatedEmergency);
             } else {
               // Exceeded window: Start new cycle with this blink as #1
               blinkCountInGesture.current = 1;
               firstBlinkTime.current = now;
+              lastBlinkEndTime.current = now;
             }
           }
         } else if (blinkDuration > 800) {
@@ -671,7 +748,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Telemetry feedback during waiting window for 2nd blink (or 1st blink auto-down)
+    // Telemetry feedback during waiting window for 2nd or 3rd blink
     if (blinkCountInGesture.current === 1 && actionTriggeredThisFrame === 'NONE' && cooldownTimer.current <= 0) {
       const remainingMs = Math.max(0, BLINK_DECISION_WINDOW_MS - (now - firstBlinkTime.current));
       const remainingSecs = (remainingMs / 1000).toFixed(1);
@@ -682,7 +759,19 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         blinkCount: 1,
         blinkWindowRemainingMs: Math.round(remainingMs),
         actionProgress: actionProg,
-        lastActionTriggered: `Đã chớp 1 cái (chờ ${remainingSecs}s để Xuống dưới ↓, hoặc chớp tiếp để Chọn 🎯)...`,
+        lastActionTriggered: `Đã chớp 1/3 (chờ ${remainingSecs}s để Xuống dưới ↓, hoặc chớp tiếp: 2=Chọn, 3=Khẩn cấp)...`,
+      };
+    } else if (blinkCountInGesture.current === 2 && actionTriggeredThisFrame === 'NONE' && cooldownTimer.current <= 0) {
+      const remainingMs = Math.max(0, BLINK_DECISION_WINDOW_MS - (now - lastBlinkEndTime.current));
+      const remainingSecs = (remainingMs / 1000).toFixed(1);
+      actionProg = Math.min(100, Math.round((remainingMs / BLINK_DECISION_WINDOW_MS) * 100));
+
+      latestTelemetryRef.current = {
+        ...latestTelemetryRef.current,
+        blinkCount: 2,
+        blinkWindowRemainingMs: Math.round(remainingMs),
+        actionProgress: actionProg,
+        lastActionTriggered: `Đã chớp 2/3 (chờ ${remainingSecs}s để Chọn 🎯, hoặc chớp cái thứ 3 để Gọi khẩn cấp 🚨)...`,
       };
     }
 
@@ -930,12 +1019,18 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     let currentBlinkCount = blinkCountInGesture.current;
     let currentBlinkRemainingMs = 0;
 
-    if (now < selectSuccessUntil.current) {
+    if (now < emergencySuccessUntil.current) {
+      currentBlinkCount = 3;
+      currentBlinkRemainingMs = 0;
+    } else if (now < selectSuccessUntil.current) {
       currentBlinkCount = 2;
       currentBlinkRemainingMs = 0;
+    } else if (blinkCountInGesture.current === 2) {
+      currentBlinkCount = 2;
+      currentBlinkRemainingMs = Math.max(0, BLINK_DECISION_WINDOW_MS - (now - lastBlinkEndTime.current));
     } else if (blinkCountInGesture.current === 1) {
       currentBlinkCount = 1;
-      currentBlinkRemainingMs = Math.max(0, 1500 - (now - firstBlinkTime.current));
+      currentBlinkRemainingMs = Math.max(0, BLINK_DECISION_WINDOW_MS - (now - firstBlinkTime.current));
     } else {
       currentBlinkCount = 0;
       currentBlinkRemainingMs = 0;
@@ -949,7 +1044,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       actionTriggeredThisFrame !== 'NONE';
 
     const timeSinceLastDispatch = now - lastTelemetryDispatchTime.current;
-    const isThrottleDue = timeSinceLastDispatch >= (currentBlinkCount === 1 ? 40 : TELEMETRY_THROTTLE_MS);
+    const isThrottleDue = timeSinceLastDispatch >= (currentBlinkCount > 0 ? 40 : TELEMETRY_THROTTLE_MS);
 
     const nextTelemetry: EyeTrackingState = {
       ...prevTelemetry,
@@ -995,7 +1090,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     if (!settings.simulatorMode) return;
 
     let spaceTimer: any = null;
-    let spacePending = false;
+    let spacePendingCount = 0;
 
     function handleKeyDown(e: KeyboardEvent) {
       const activeEl = document.activeElement;
@@ -1162,19 +1257,20 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         if (cooldownTimer.current <= 0) {
           if (e.key === ' ') {
             // Space simulates Blink in simulator mode:
-            // 1 Space press (after 650ms) -> DOWN
-            // 2 Space presses (within 650ms) -> SELECT
-            if (!spacePending) {
-              spacePending = true;
+            // 1 Space press (after 700ms) -> DOWN
+            // 2 Space presses (within 700ms) -> SELECT
+            // 3 Space presses (within 700ms) -> EMERGENCY
+            if (spacePendingCount === 0) {
+              spacePendingCount = 1;
               setTrackingState(prev => ({
                 ...prev,
                 blinkCount: 1,
-                blinkWindowRemainingMs: 650,
-                lastActionTriggered: 'Đã chớp 1 cái (chờ 0.6s để Xuống dưới ↓, hoặc bấm Space tiếp để Chọn 🎯)...',
+                blinkWindowRemainingMs: 700,
+                lastActionTriggered: 'Chớp 1/3 (chờ 0.7s để Xuống ↓, hoặc bấm Space tiếp: 2=Chọn, 3=Khẩn cấp)...',
               }));
               if (spaceTimer) clearTimeout(spaceTimer);
               spaceTimer = setTimeout(() => {
-                spacePending = false;
+                spacePendingCount = 0;
                 const executed = dispatchAction('DOWN');
                 const nowTs = performance.now();
                 cooldownTimer.current = 1200;
@@ -1191,28 +1287,59 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
                   cooldownRemainingMs: 1200,
                   cooldownTotalMs: 1200,
                 }));
-              }, 650);
-            } else {
-              // 2nd press within 650ms -> Trigger SELECT!
+              }, 700);
+            } else if (spacePendingCount === 1) {
               if (spaceTimer) clearTimeout(spaceTimer);
-              spacePending = false;
-              selectSuccessUntil.current = performance.now() + 1200;
-              const executed = dispatchAction('SELECT');
+              spacePendingCount = 2;
+              setTrackingState(prev => ({
+                ...prev,
+                blinkCount: 2,
+                blinkWindowRemainingMs: 700,
+                lastActionTriggered: 'Chớp 2/3 (chờ 0.7s để Chọn 🎯, hoặc bấm Space cái thứ 3 để Gọi khẩn cấp 🚨)...',
+              }));
+              spaceTimer = setTimeout(() => {
+                spacePendingCount = 0;
+                selectSuccessUntil.current = performance.now() + 1200;
+                const executed = dispatchAction('SELECT');
+                const execTs = performance.now();
+                cooldownTimer.current = ACTION_COOLDOWN_MS;
+                lastExecutedActionRef.current = 'SELECT';
+                lastExecutedTimestampRef.current = execTs;
+
+                setTrackingState(prev => ({
+                  ...prev,
+                  lastActionTriggered: executed ? 'SELECT (Chớp 2 cái phím Space - Đã Chọn 🎯)' : 'Chưa có phần tử được chọn',
+                  currentAction: 'SELECT',
+                  lastExecutedAction: 'SELECT',
+                  lastExecutedTimestamp: execTs,
+                  blinkCount: 2,
+                  blinkWindowRemainingMs: 0,
+                  cooldownRemainingMs: ACTION_COOLDOWN_MS,
+                  cooldownTotalMs: ACTION_COOLDOWN_MS,
+                }));
+              }, 700);
+            } else if (spacePendingCount === 2) {
+              // 3rd Space press -> IMMEDIATELY TRIGGER EMERGENCY!
+              if (spaceTimer) clearTimeout(spaceTimer);
+              spacePendingCount = 0;
+              emergencySuccessUntil.current = performance.now() + 1500;
+              const executed = dispatchAction('EMERGENCY');
+              window.dispatchEvent(new CustomEvent('eyeai:emergency'));
               const execTs = performance.now();
-              cooldownTimer.current = ACTION_COOLDOWN_MS;
-              lastExecutedActionRef.current = 'SELECT';
+              cooldownTimer.current = ACTION_COOLDOWN_MS + 500;
+              lastExecutedActionRef.current = 'EMERGENCY';
               lastExecutedTimestampRef.current = execTs;
 
               setTrackingState(prev => ({
                 ...prev,
-                lastActionTriggered: executed ? 'SELECT (Chớp 2 cái phím Space - Đã Chọn 🎯)' : 'Chưa có phần tử được chọn',
-                currentAction: 'SELECT',
-                lastExecutedAction: 'SELECT',
+                lastActionTriggered: 'EMERGENCY (Nháy 3 cái phím Space - Kích hoạt gọi khẩn cấp 🚨)',
+                currentAction: 'EMERGENCY',
+                lastExecutedAction: 'EMERGENCY',
                 lastExecutedTimestamp: execTs,
-                blinkCount: 2,
+                blinkCount: 3,
                 blinkWindowRemainingMs: 0,
-                cooldownRemainingMs: ACTION_COOLDOWN_MS,
-                cooldownTotalMs: ACTION_COOLDOWN_MS,
+                cooldownRemainingMs: ACTION_COOLDOWN_MS + 500,
+                cooldownTotalMs: ACTION_COOLDOWN_MS + 500,
               }));
             }
           } else {
@@ -1242,6 +1369,25 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
             }));
           }
         }
+      } else if (e.key === 'F1') {
+        // F1 directly triggers EMERGENCY for fast testing
+        e.preventDefault();
+        const executed = dispatchAction('EMERGENCY');
+        window.dispatchEvent(new CustomEvent('eyeai:emergency'));
+        const nowTs = performance.now();
+        cooldownTimer.current = ACTION_COOLDOWN_MS + 500;
+        lastExecutedActionRef.current = 'EMERGENCY';
+        lastExecutedTimestampRef.current = nowTs;
+        setTrackingState(prev => ({
+          ...prev,
+          lastActionTriggered: 'EMERGENCY (Phím F1 - Kích hoạt gọi khẩn cấp 🚨)',
+          currentAction: 'EMERGENCY',
+          lastExecutedAction: 'EMERGENCY',
+          lastExecutedTimestamp: nowTs,
+          blinkCount: 3,
+          cooldownRemainingMs: ACTION_COOLDOWN_MS + 500,
+          cooldownTotalMs: ACTION_COOLDOWN_MS + 500,
+        }));
       } else if (e.key === 'Escape') {
         e.preventDefault();
         const executed = dispatchAction('ESCAPE');

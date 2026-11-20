@@ -78,6 +78,7 @@ function AppContent() {
   const [ocrResultsState, setOcrResultsState] = useState<OcrResultItem[]>([]);
   const [analysisBundleState, setAnalysisBundleState] = useState<AnalysisBundle | null>(null);
   const [analysisInitialTab, setAnalysisInitialTab] = useState<'analysis' | 'meal' | 'exercise'>('analysis');
+  const [isAutoEmergencyCall, setIsAutoEmergencyCall] = useState<boolean>(false);
 
   // Startup Splash & Real Preload State
   const [isSplashActive, setIsSplashActive] = useState<boolean>(true);
@@ -112,6 +113,13 @@ function AppContent() {
       if (params.results) setOcrResultsState(params.results);
       if (params.bundle) setAnalysisBundleState(params.bundle);
       if (params.tab) setAnalysisInitialTab(params.tab);
+      if (params.autoCall !== undefined) {
+        setIsAutoEmergencyCall(params.autoCall);
+      } else {
+        setIsAutoEmergencyCall(false);
+      }
+    } else {
+      setIsAutoEmergencyCall(false);
     }
     setCurrentRoute(route as AppRoute);
     window.scrollTo(0, 0);
@@ -144,6 +152,18 @@ function AppContent() {
     window.addEventListener('eyeai:escape', handleEyeEscape);
     return () => window.removeEventListener('eyeai:escape', handleEyeEscape);
   }, [currentRoute, profile?.account_type]);
+
+  // Global TRIPLE BLINK emergency call listener: immediately navigates to SOS & activates calling
+  useEffect(() => {
+    const handleGlobalEmergency = () => {
+      setIsAutoEmergencyCall(true);
+      setCurrentRoute('sos');
+      window.scrollTo(0, 0);
+    };
+
+    window.addEventListener('eyeai:emergency', handleGlobalEmergency);
+    return () => window.removeEventListener('eyeai:emergency', handleGlobalEmergency);
+  }, []);
 
   // EXPERIENCE ROUTER ENGINE: Handle account_type switching automatically
   useEffect(() => {
@@ -279,7 +299,7 @@ function AppContent() {
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.15 }}
                   >
-                    <SosPage onBack={() => navigateTo('home')} />
+                    <SosPage onBack={() => navigateTo('home')} autoCall={isAutoEmergencyCall} />
                   </motion.div>
                 )}
 

@@ -152,17 +152,21 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
                   <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 hidden sm:inline truncate">
                     Mắt đang nhắm ({closedDuration.toFixed(1)}s)
                   </span>
+                ) : blinkCount === 3 ? (
+                  <span className="text-[10px] font-black text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-300 hidden sm:inline truncate shadow-xs animate-pulse">
+                    Chớp: 3 / 3 • GỌI KHẨN CẤP 🚨
+                  </span>
                 ) : blinkCount === 2 ? (
                   <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300 hidden sm:inline truncate shadow-xs">
-                    Chớp: 2 / 2 • ĐÃ CHỌN 🎯
+                    Chớp: 2 / 3 • Chọn 🎯 (còn {(blinkWindowRemainingMs / 1000).toFixed(1)}s, hoặc chớp tiếp)
                   </span>
                 ) : blinkCount === 1 ? (
                   <span className="text-[10px] font-black text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300 hidden sm:inline truncate animate-pulse shadow-xs">
-                    Chớp 1: Xuống ↓ (còn {(blinkWindowRemainingMs / 1000).toFixed(1)}s, hoặc chớp tiếp để Chọn)
+                    Chớp: 1 / 3 • Xuống ↓ (còn {(blinkWindowRemainingMs / 1000).toFixed(1)}s, hoặc chớp tiếp)
                   </span>
                 ) : (
                   <span className="text-[10px] font-bold text-[#3B4B68] hidden sm:inline truncate">
-                    Chớp 1 cái: Xuống ↓ • Chớp 2 cái: Chọn 🎯
+                    Chớp 1: Xuống ↓ • Chớp 2: Chọn 🎯 • Chớp 3: Gọi khẩn cấp 🚨
                   </span>
                 )}
               </div>
@@ -249,14 +253,16 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
                   <span className="text-[9px] font-bold text-[#3B4B68] truncate mt-0.5">
                     {isCooldownActive ? (
                       <span className="text-amber-700 font-black">Chờ: {cooldownSecs}s</span>
+                    ) : blinkCount === 3 ? (
+                      <span className="text-rose-700 font-black animate-pulse">Chớp 3/3: Gọi khẩn cấp 🚨</span>
                     ) : blinkCount === 2 ? (
-                      <span className="text-emerald-700 font-black">Chớp 2/2: Đã Chọn 🎯</span>
+                      <span className="text-emerald-700 font-black">Chớp 2/3: Chọn 🎯 (còn {(blinkWindowRemainingMs / 1000).toFixed(1)}s)</span>
                     ) : blinkCount === 1 ? (
-                      <span className="text-amber-800 font-black animate-pulse">Chớp 1: Xuống ↓ (còn {(blinkWindowRemainingMs / 1000).toFixed(1)}s)</span>
+                      <span className="text-amber-800 font-black animate-pulse">Chớp 1/3: Xuống ↓ (còn {(blinkWindowRemainingMs / 1000).toFixed(1)}s)</span>
                     ) : eyesClosed ? (
                       <span className="text-amber-800 font-black">Nhắm ({closedDuration.toFixed(1)}s)</span>
                     ) : (
-                      <span className="text-emerald-700 font-black">Chớp 1: Xuống | 2: Chọn</span>
+                      <span className="text-emerald-700 font-black">Chớp 1: Xuống | 2: Chọn | 3: SOS</span>
                     )}
                   </span>
                 </div>

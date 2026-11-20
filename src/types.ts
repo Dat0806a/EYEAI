@@ -18,6 +18,7 @@ export type EyeAction =
   | 'SELECT'
   | 'ESCAPE'
   | 'DOUBLE_BLINK'
+  | 'EMERGENCY'
   | 'NONE';
 
 export interface EyeCalibrationData {
