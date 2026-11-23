@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { handleEntertainmentSearch } from "./server/youtubeBackend";
+import { createPatientRouter } from "./server/patientBackend";
 
 dotenv.config();
 
@@ -11,7 +12,7 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
 
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "25mb" }));
 
   // API Health Check
   app.get("/api/health", (_req, res) => {
@@ -88,7 +89,7 @@ async function startServer() {
       contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
       // Model list with official fallback
-      const modelsToTry = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-flash-lite-latest", "gemini-2.0-flash"];
+      const modelsToTry = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"];
       let lastError: any = null;
       let replyText = "";
 
@@ -144,7 +145,8 @@ async function startServer() {
   // Backend Endpoints for AI Chat
   app.post("/api/ai/chat", handleAiChat);
   app.post("/api/gemini/chat", handleAiChat);
-  app.post("/api/patient/chat", handleAiChat);
+  // Dedicated Isolated Router for Patient Module (OCR Vision + Dynamic Lab Analysis + Health Chat)
+  app.use("/api/patient", createPatientRouter(ai, apiKey));
 
   // Backend Endpoints for Entertainment YouTube Search (FREE QUOTA ONLY)
   app.get("/api/entertainment/search", handleEntertainmentSearch);

@@ -7,7 +7,7 @@ import {
   OcrScanResponse,
 } from '../types/patient';
 import { parseOcrText } from './patientOcrNormalizer';
-import { buildCompleteBundle } from './patientAnalysisService';
+import { buildCompleteBundle, classifyResult } from './patientAnalysisService';
 
 const LOCAL_STORAGE_KEY_REPORTS = 'eyetalk_patient_reports';
 const LOCAL_STORAGE_KEY_BUNDLES = 'eyetalk_patient_bundles';
@@ -48,67 +48,76 @@ function saveLocalBundle(reportId: string, bundle: AnalysisBundle) {
   }
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result);
+    };
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
 /**
- * Scan lab report file or text, returns OCR parsed items
+ * Scan lab report file (Image, PDF, or Text) via real Gemini Vision OCR API
+ * with automatic dynamic schema extraction and graceful local fallback
  */
 export async function scanOcr(file: File): Promise<OcrScanResponse> {
   const reportId = 'rep_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+  let results: OcrResultItem[] = [];
+  let provider = 'GEMINI_VISION';
 
-  let rawText = '';
-  if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
-    rawText = await file.text();
-  } else {
-    // Standard mock default lines if image OCR is run locally without server API
-    rawText = [
-      'WBC | Số lượng bạch cầu | 7.2 | 10^9/L | 4.0 - 10.0',
-      'RBC | Số lượng hồng cầu | 3.8 | 10^12/L | 4.0 - 5.5',
-      'HGB | Hemoglobin | 112 | g/L | 120 - 160',
-      'PLT | Số lượng tiểu cầu | 210 | 10^9/L | 150 - 400',
-      'GLUCOSE | Đường huyết | 6.8 | mmol/L | 3.9 - 6.1',
-    ].join('\n');
-  }
+  try {
+    // 1. Convert file to base64 for API delivery
+    const fileBase64 = await fileToBase64(file);
+    const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : file.name.endsWith('.txt') ? 'text/plain' : 'image/jpeg');
 
-  const results = parseOcrText(rawText);
+    // 2. Call dedicated Patient OCR endpoint on Express server
+    const res = await fetch('/api/patient/ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileBase64,
+        mimeType,
+        fileName: file.name,
+      }),
+    });
 
-  // Fallback default sample if empty
-  if (results.length === 0) {
-    results.push(
-      {
-        testCode: 'WBC',
-        testName: 'Số lượng bạch cầu',
-        value: 7.2,
-        unit: '10^9/L',
-        referenceRange: { low: 4.0, high: 10.0, text: '4.0 - 10.0' },
-        ocrConfidence: 0.95,
-      },
-      {
-        testCode: 'RBC',
-        testName: 'Số lượng hồng cầu',
-        value: 3.8,
-        unit: '10^12/L',
-        referenceRange: { low: 4.0, high: 5.5, text: '4.0 - 5.5' },
-        ocrConfidence: 0.92,
-      },
-      {
-        testCode: 'HGB',
-        testName: 'Hemoglobin',
-        value: 112,
-        unit: 'g/L',
-        referenceRange: { low: 120, high: 160, text: '120 - 160' },
-        ocrConfidence: 0.95,
-      },
-      {
-        testCode: 'GLUCOSE',
-        testName: 'Đường huyết (Glucose)',
-        value: 6.8,
-        unit: 'mmol/L',
-        referenceRange: { low: 3.9, high: 6.1, text: '3.9 - 6.1' },
-        ocrConfidence: 0.9,
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.results) && data.results.length > 0) {
+        results = data.results;
+        provider = data.provider || 'GEMINI_VISION';
       }
-    );
+    } else {
+      const errorJson = await res.json().catch(() => null);
+      const serverErrMsg = errorJson?.error || `Lỗi máy chủ (${res.status})`;
+      console.error('[PATIENT-SERVICE] Vision OCR returned non-ok status:', res.status, serverErrMsg);
+      throw new Error(serverErrMsg);
+    }
+  } catch (apiErr: any) {
+    console.warn('[PATIENT-SERVICE] Vision OCR error:', apiErr);
+    if (apiErr?.message && !apiErr.message.includes('fetch')) {
+      throw apiErr;
+    }
   }
 
-  // Create initial report state
+  // 3. Handle non-image text file parsing or report real error (no mock substitution)
+  if (results.length === 0) {
+    if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+      const rawText = await file.text();
+      results = parseOcrText(rawText);
+      provider = 'LOCAL_TEXT_PARSER';
+    } else {
+      throw new Error(
+        'Không thể nhận diện được chỉ số xét nghiệm từ hình ảnh tải lên. Vui lòng kiểm tra độ sáng, góc chụp và chụp lại rõ nét hơn.'
+      );
+    }
+  }
+
+  // 4. Create and persist initial report metadata
   const reportObj: HistoryReport = {
     id: reportId,
     created_at: new Date().toISOString(),
@@ -118,7 +127,7 @@ export async function scanOcr(file: File): Promise<OcrScanResponse> {
   };
   saveLocalReport(reportObj);
 
-  // Try saving to Supabase if authenticated
+  // 5. Sync to Supabase if user is authenticated
   try {
     const { data: userData } = await supabase.auth.getUser();
     if (userData?.user) {
@@ -136,22 +145,53 @@ export async function scanOcr(file: File): Promise<OcrScanResponse> {
 
   return {
     reportId,
-    provider: 'SYSTEM_OCR',
+    provider,
     results,
   };
 }
 
 /**
- * Confirm reviewed lab results and create full analysis bundle
+ * Confirm reviewed lab results and create full AI analysis bundle
+ * Calls Gemini LLM for verified explanation + dietary & exercise recommendations
  */
 export async function confirmAnalysis(
   reportId: string,
-  confirmedResults: ConfirmedLabResult[]
+  confirmedResults: ConfirmedLabResult[],
+  age: number = 35
 ): Promise<AnalysisBundle> {
-  const bundle = buildCompleteBundle(reportId, confirmedResults);
+  let bundle: AnalysisBundle | null = null;
+
+  try {
+    // 1. Call dedicated Patient LLM analysis endpoint
+    const res = await fetch('/api/patient/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reportId,
+        results: confirmedResults,
+        age,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.bundle && data.bundle.analysis) {
+        bundle = data.bundle;
+      }
+    }
+  } catch (err) {
+    console.warn('[PATIENT-SERVICE] AI Analysis endpoint failed, using local rule-based engine:', err);
+  }
+
+  // 2. Fallback to local rule engine if offline or server error
+  if (!bundle) {
+    bundle = buildCompleteBundle(reportId, confirmedResults, age);
+  }
+
+  // 3. Save bundle locally
   saveLocalBundle(reportId, bundle);
 
-  // Update history report status locally
+  // 4. Update history report status
   const reports = getLocalReports();
   const index = reports.findIndex((r) => r.id === reportId);
   if (index !== -1) {
@@ -167,11 +207,10 @@ export async function confirmAnalysis(
     });
   }
 
-  // Sync to Supabase if table exists
+  // 5. Sync to Supabase with type-safe numeric value handling
   try {
     const { data: userData } = await supabase.auth.getUser();
     if (userData?.user) {
-      // Upsert report record
       await supabase.from('lab_reports').upsert({
         id: reportId,
         user_id: userData.user.id,
@@ -179,24 +218,31 @@ export async function confirmAnalysis(
         source_type: 'UPLOAD',
       });
 
-      // Insert results
-      const insertRows = confirmedResults.map((r) => ({
-        report_id: reportId,
-        test_code: r.testCode,
-        test_name: r.testName,
-        value: r.value,
-        unit: r.unit,
-        reference_low: r.referenceLow,
-        reference_high: r.referenceHigh,
-        reference_text: r.referenceText,
-        status: r.referenceLow !== null && r.value < r.referenceLow ? 'LOW' : r.referenceHigh !== null && r.value > r.referenceHigh ? 'HIGH' : 'NORMAL',
-      }));
+      const insertRows = confirmedResults.map((r) => {
+        const numVal = typeof r.value === 'number' ? r.value : Number(r.value);
+        const safeNum = Number.isFinite(numVal) ? numVal : 0;
+        const status = classifyResult(r);
+
+        return {
+          report_id: reportId,
+          test_code: r.testCode,
+          test_name: r.testName,
+          value: safeNum,
+          unit: r.unit,
+          reference_low: r.referenceLow,
+          reference_high: r.referenceHigh,
+          reference_text: r.referenceText,
+          status,
+          ocr_confidence: 1.0,
+          explanation: typeof r.value === 'string' && !Number.isFinite(numVal) ? `[Định tính: ${r.value}]` : null,
+        };
+      });
 
       await supabase.from('lab_results').delete().eq('report_id', reportId);
       await supabase.from('lab_results').insert(insertRows);
     }
-  } catch {
-    // Ignore database sync errors
+  } catch (dbErr) {
+    console.warn('[PATIENT-SERVICE] Supabase sync notice:', dbErr);
   }
 
   return bundle;
@@ -218,15 +264,20 @@ export async function getReportDetail(reportId: string): Promise<AnalysisBundle>
       .eq('report_id', reportId);
 
     if (!error && results && results.length > 0) {
-      const confirmed: ConfirmedLabResult[] = results.map((r) => ({
-        testCode: r.test_code,
-        testName: r.test_name,
-        value: Number(r.value),
-        unit: r.unit,
-        referenceLow: r.reference_low ? Number(r.reference_low) : null,
-        referenceHigh: r.reference_high ? Number(r.reference_high) : null,
-        referenceText: r.reference_text,
-      }));
+      const confirmed: ConfirmedLabResult[] = results.map((r) => {
+        const isQual = typeof r.explanation === 'string' && r.explanation.startsWith('[Định tính: ');
+        const qualVal = isQual ? r.explanation.replace('[Định tính: ', '').replace(']', '') : '';
+        return {
+          testCode: r.test_code,
+          testName: r.test_name,
+          value: isQual ? qualVal : Number(r.value),
+          valueType: isQual ? 'QUALITATIVE' : 'NUMERIC',
+          unit: r.unit,
+          referenceLow: r.reference_low ? Number(r.reference_low) : null,
+          referenceHigh: r.reference_high ? Number(r.reference_high) : null,
+          referenceText: r.reference_text,
+        };
+      });
       const bundle = buildCompleteBundle(reportId, confirmed);
       saveLocalBundle(reportId, bundle);
       return bundle;
@@ -235,14 +286,8 @@ export async function getReportDetail(reportId: string): Promise<AnalysisBundle>
     // Ignore
   }
 
-  // 3. Fallback mock sample bundle if not found
-  const fallbackConfirmed: ConfirmedLabResult[] = [
-    { testCode: 'WBC', testName: 'Số lượng bạch cầu', value: 7.2, unit: '10^9/L', referenceLow: 4.0, referenceHigh: 10.0, referenceText: '4.0 - 10.0' },
-    { testCode: 'RBC', testName: 'Số lượng hồng cầu', value: 3.8, unit: '10^12/L', referenceLow: 4.0, referenceHigh: 5.5, referenceText: '4.0 - 5.5' },
-    { testCode: 'HGB', testName: 'Hemoglobin', value: 112, unit: 'g/L', referenceLow: 120, referenceHigh: 160, referenceText: '120 - 160' },
-    { testCode: 'GLUCOSE', testName: 'Đường huyết (Glucose)', value: 6.8, unit: 'mmol/L', referenceLow: 3.9, referenceHigh: 6.1, referenceText: '3.9 - 6.1' },
-  ];
-  return buildCompleteBundle(reportId, fallbackConfirmed);
+  // 3. No fallback mock bundle in production
+  throw new Error('Không tìm thấy dữ liệu kết quả xét nghiệm cho phiếu này. Vui lòng rà soát hoặc quét lại.');
 }
 
 /**
@@ -269,17 +314,18 @@ export async function getHistory(): Promise<HistoryReport[]> {
 }
 
 /**
- * Send chat message to Patient AI Chatbot
+ * Send chat message to specialized Patient AI Health Chatbot
  */
 export async function sendPatientChatMessage(
   message: string,
-  reportSummary?: string
+  reportSummary?: string,
+  labResults?: any[]
 ): Promise<string> {
   try {
     const res = await fetch('/api/patient/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, reportSummary }),
+      body: JSON.stringify({ message, reportSummary, labResults }),
     });
 
     if (res.ok) {

@@ -10,9 +10,10 @@ interface Message {
 
 interface PatientChatWidgetProps {
   reportSummary?: string;
+  labResults?: any[];
 }
 
-export function PatientChatWidget({ reportSummary }: PatientChatWidgetProps) {
+export function PatientChatWidget({ reportSummary, labResults }: PatientChatWidgetProps) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -74,7 +75,7 @@ export function PatientChatWidget({ reportSummary }: PatientChatWidgetProps) {
     setLoading(true);
 
     try {
-      const reply = await sendPatientChatMessage(text, reportSummary);
+      const reply = await sendPatientChatMessage(text, reportSummary, labResults);
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
       speakVietnamese(reply);
     } catch {

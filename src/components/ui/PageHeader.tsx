@@ -12,6 +12,8 @@ interface PageHeaderProps {
   onBack?: () => void;
   onOpenSettings?: () => void;
   onOpenHelp?: () => void;
+  isPatient?: boolean;
+  currentRoute?: string;
 }
 
 export const PageHeader = memo(function PageHeader({
@@ -20,12 +22,15 @@ export const PageHeader = memo(function PageHeader({
   onBack,
   onOpenSettings,
   onOpenHelp,
+  isPatient: propIsPatient,
+  currentRoute,
 }: PageHeaderProps) {
   const { settings, setEyeControlEnabled } = useEyeTrackingSettings();
   const { openTutorial } = useTutorial();
   const { profile } = useAuth();
   const isEyeMode = settings.eyeControlEnabled;
-  const isPatient = profile?.account_type === 'patient';
+  const isPatientRoute = typeof currentRoute === 'string' && currentRoute.startsWith('patient-');
+  const isPatient = propIsPatient !== undefined ? propIsPatient : (profile?.account_type === 'patient' || isPatientRoute);
 
   const handleHelpClick = () => {
     if (onOpenHelp) {
@@ -130,8 +135,8 @@ export const PageHeader = memo(function PageHeader({
         </div>
       </header>
 
-      {/* Camera HUD Bar Slot (First content element directly below header when keyboard is open) */}
-      <KeyboardHudSlot />
+      {/* Camera HUD Bar Slot (Only for Impaired users, never in Patient Mode) */}
+      {!isPatient && <KeyboardHudSlot currentRoute={currentRoute} />}
     </div>
   );
 });

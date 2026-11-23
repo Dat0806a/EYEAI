@@ -82,6 +82,20 @@ export function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormProps) {
       });
 
       if (!signInErr && signInData.user) {
+        // Ensure profile has demoRole ('impaired') in DB and metadata
+        await supabase.from('profiles').upsert({
+          id: signInData.user.id,
+          display_name: demoName,
+          account_type: demoRole,
+        });
+        await supabase.auth.updateUser({
+          data: {
+            display_name: demoName,
+            role: demoRole,
+            account_type: demoRole,
+          },
+        });
+
         speakVietnamese(`Đã đăng nhập ${demoName}`);
         onSuccess();
         return;
@@ -105,7 +119,6 @@ export function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormProps) {
         await supabase.from('profiles').upsert({
           id: signUpData.user.id,
           display_name: demoName,
-          role: demoRole,
           account_type: demoRole,
         });
 

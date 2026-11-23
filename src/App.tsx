@@ -226,8 +226,8 @@ function AppContent() {
             )}
           </AnimatePresence>
 
-          {/* Global Accessibility Eye Camera HUD */}
-          {!isSplashActive && !shouldShowAuth && profile?.account_type !== 'patient' && (
+          {/* Global Accessibility Eye Camera HUD - only for Impaired users, never on Patient routes */}
+          {!isSplashActive && !shouldShowAuth && profile?.account_type !== 'patient' && !currentRoute.startsWith('patient-') && (
             <GlobalEyeHUD variant="floating" currentRoute={currentRoute} />
           )}
 
@@ -427,7 +427,8 @@ function AppContent() {
                       onBack={() => navigateTo('patient-scan')}
                       onOpenSettings={() => navigateTo('settings')}
                       onConfirmSuccess={(bundle) => {
-                        navigateTo('patient-analysis', { reportId: activeReportId, bundle });
+                        const targetId = activeReportId || bundle.analysis?.reportId;
+                        navigateTo('patient-analysis', { reportId: targetId, bundle });
                       }}
                     />
                   </motion.div>

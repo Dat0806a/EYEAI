@@ -76,8 +76,8 @@ export function useAuth() {
 
       if (!error && data) {
         const rawType = data.account_type || data.role || metaRole;
-        const validAccountType: AccountType | null =
-          rawType === 'impaired' || rawType === 'patient' ? rawType : null;
+        const validAccountType: AccountType =
+          rawType === 'patient' ? 'patient' : 'impaired';
 
         setProfile({
           id: data.id,
@@ -88,8 +88,8 @@ export function useAuth() {
         });
       } else {
         // Fallback profile if user profile row isn't fetched yet
-        const validMetaType: AccountType | null =
-          metaRole === 'impaired' || metaRole === 'patient' ? metaRole : null;
+        const validMetaType: AccountType =
+          metaRole === 'patient' ? 'patient' : 'impaired';
 
         setProfile({
           id: userId,
@@ -111,7 +111,7 @@ export function useAuth() {
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ account_type: newType, role: newType })
+        .update({ account_type: newType })
         .eq('id', user.id);
 
       if (error) throw error;

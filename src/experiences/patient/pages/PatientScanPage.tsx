@@ -33,23 +33,16 @@ export function PatientScanPage({ onBack, onOpenSettings, onScanComplete }: Pati
     }
   };
 
-  const handleCreateSampleReport = () => {
-    const sampleText = [
-      'WBC | Số lượng bạch cầu | 7.2 | 10^9/L | 4.0 - 10.0',
-      'RBC | Số lượng hồng cầu | 3.8 | 10^12/L | 4.0 - 5.5',
-      'HGB | Hemoglobin | 112 | g/L | 120 - 160',
-      'PLT | Số lượng tiểu cầu | 210 | 10^9/L | 150 - 400',
-      'GLUCOSE | Đường huyết | 6.8 | mmol/L | 3.9 - 6.1',
-    ].join('\n');
-
-    const blob = new Blob([sampleText], { type: 'text/plain' });
-    const file = new File([blob], 'mau-xet-nghiem.txt', { type: 'text/plain' });
-    handleFileProcess(file);
-  };
-
   return (
     <div className="min-h-screen bg-transparent text-[#14213D] flex flex-col pb-28">
-      <PageHeader title="Quét giấy xét nghiệm" showBack onBack={onBack} onOpenSettings={onOpenSettings} />
+      <PageHeader
+        title="Quét giấy xét nghiệm"
+        showBack
+        onBack={onBack}
+        onOpenSettings={onOpenSettings}
+        isPatient={true}
+        currentRoute="patient-scan"
+      />
 
       <main className="flex-1 max-w-md md:max-w-xl mx-auto w-full px-4 py-6 flex flex-col gap-6">
         {/* Instruction Card */}
@@ -138,25 +131,6 @@ export function PatientScanPage({ onBack, onOpenSettings, onScanComplete }: Pati
                     <span>Chụp bằng camera</span>
                   </AppButton>
                 </div>
-              </div>
-
-              {/* Sample test button for testing */}
-              <div className="p-4 rounded-[20px] bg-amber-500/10 border border-amber-500/20 flex flex-col gap-2">
-                <div className="flex items-center gap-2 text-amber-900 font-black text-xs">
-                  <FileText className="w-4 h-4 text-amber-700" />
-                  <span>Chưa có tệp xét nghiệm thật?</span>
-                </div>
-                <p className="text-xs text-amber-950 font-bold">
-                  Bạn có thể dùng mẫu dữ liệu thử nghiệm chuẩn để trải nghiệm toàn bộ luồng phân tích.
-                </p>
-                <AppButton
-                  id="btn-sample-report"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCreateSampleReport}
-                >
-                  <span>Dùng mẫu xét nghiệm thử</span>
-                </AppButton>
               </div>
             </>
           )}

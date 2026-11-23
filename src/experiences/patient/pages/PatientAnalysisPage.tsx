@@ -11,6 +11,7 @@ import {
   HelpCircle,
   ArrowLeft,
   Loader2,
+  Bookmark,
 } from 'lucide-react';
 import { AnalysisBundle, MealPlanItem, ExercisePlanItem } from '../../../types/patient';
 import { getReportDetail } from '../../../services/patientService';
@@ -52,7 +53,17 @@ export function PatientAnalysisPage({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (initialBundle) return;
+    if (initialBundle) {
+      setBundle(initialBundle);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    if (!reportId) {
+      setLoading(false);
+      setError('Chưa có thông tin phiếu xét nghiệm để hiển thị.');
+      return;
+    }
     setLoading(true);
     getReportDetail(reportId)
       .then((res) => {
@@ -64,6 +75,12 @@ export function PatientAnalysisPage({
       .finally(() => setLoading(false));
   }, [reportId, initialBundle]);
 
+  useEffect(() => {
+    if (initialTab) {
+      setTab(initialTab);
+    }
+  }, [initialTab]);
+
   return (
     <div className="min-h-screen bg-transparent text-[#14213D] flex flex-col pb-28">
       <PageHeader
@@ -71,6 +88,8 @@ export function PatientAnalysisPage({
         showBack
         onBack={onBack}
         onOpenSettings={onOpenSettings}
+        isPatient={true}
+        currentRoute="patient-analysis"
       />
 
       <main className="flex-1 max-w-md md:max-w-xl mx-auto w-full px-4 py-6 flex flex-col gap-5">
@@ -177,12 +196,16 @@ export function PatientAnalysisPage({
                         ? 'Thấp'
                         : res.status === 'HIGH'
                         ? 'Cao'
+                        : res.status === 'ABNORMAL'
+                        ? 'Bất thường'
+                        : res.status === 'UNCERTAIN'
+                        ? 'Nghi ngờ'
                         : res.status === 'NORMAL'
                         ? 'Bình thường'
                         : 'Cần kiểm tra'
                     }
                     status={
-                      res.status === 'LOW' || res.status === 'HIGH'
+                      res.status === 'LOW' || res.status === 'HIGH' || res.status === 'ABNORMAL' || res.status === 'UNCERTAIN'
                         ? 'warning'
                         : res.status === 'NORMAL'
                         ? 'active'
@@ -201,9 +224,17 @@ export function PatientAnalysisPage({
                   )}
                 </div>
 
-                <p className="text-xs font-bold text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                  {res.explanation}
-                </p>
+                <div className="flex flex-col gap-1.5 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                  <p className="text-xs font-bold text-slate-600 leading-relaxed">
+                    {res.explanation}
+                  </p>
+                  {res.sourceCitation && (
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 pt-1 border-t border-slate-200/60">
+                      <Bookmark className="w-3.5 h-3.5 text-[#0E6C99] shrink-0" />
+                      <span>Căn cứ y khoa: {res.sourceCitation}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -302,8 +333,11 @@ export function PatientAnalysisPage({
         )}
       </main>
 
-      {/* Floating Chatbot Widget with context summary */}
-      <PatientChatWidget reportSummary={bundle?.analysis?.overallSummary} />
+      {/* Floating Chatbot Widget with context summary and lab results */}
+      <PatientChatWidget
+        reportSummary={bundle?.analysis?.overallSummary}
+        labResults={bundle?.analysis?.results}
+      />
     </div>
   );
 }

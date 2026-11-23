@@ -29,7 +29,14 @@ export function PatientHistoryPage({
 
   return (
     <div className="min-h-screen bg-transparent text-[#14213D] flex flex-col pb-28">
-      <PageHeader title="Lịch sử xét nghiệm" showBack onBack={onBack} onOpenSettings={onOpenSettings} />
+      <PageHeader
+        title="Lịch sử xét nghiệm"
+        showBack
+        onBack={onBack}
+        onOpenSettings={onOpenSettings}
+        isPatient={true}
+        currentRoute="patient-history"
+      />
 
       <main className="flex-1 max-w-md md:max-w-xl mx-auto w-full px-4 py-6 flex flex-col gap-5">
         <div className="bg-white rounded-[28px] p-6 border-2 border-[#14213D]/10 shadow-xs flex flex-col gap-4">

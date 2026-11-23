@@ -1,4 +1,5 @@
-export type LabStatus = 'LOW' | 'NORMAL' | 'HIGH' | 'UNKNOWN';
+export type LabStatus = 'LOW' | 'NORMAL' | 'HIGH' | 'ABNORMAL' | 'UNCERTAIN' | 'UNKNOWN';
+export type ValueType = 'NUMERIC' | 'QUALITATIVE';
 
 export interface ReferenceRange {
   low: number | null;
@@ -9,31 +10,42 @@ export interface ReferenceRange {
 export interface OcrResultItem {
   testCode: string;
   testName: string;
-  value: number;
+  value: number | string;
+  valueType?: ValueType;
   unit: string;
   referenceRange: ReferenceRange;
   ocrConfidence: number;
+  isUncertain?: boolean;
+  flag?: LabStatus;
+  note?: string | null;
 }
 
 export interface OcrScanResponse {
   reportId: string;
   provider: string;
   results: OcrResultItem[];
+  hospitalOrLabName?: string | null;
+  patientName?: string | null;
+  sampleDate?: string | null;
 }
 
 export interface ConfirmedLabResult {
   testCode: string;
   testName: string;
-  value: number;
+  value: number | string;
+  valueType?: ValueType;
   unit: string;
   referenceLow: number | null;
   referenceHigh: number | null;
   referenceText: string | null;
+  isUncertain?: boolean;
+  note?: string | null;
 }
 
 export interface AnalyzedLabResult extends ConfirmedLabResult {
   status: LabStatus;
   explanation: string;
+  sourceCitation?: string;
 }
 
 export interface LabAnalysis {

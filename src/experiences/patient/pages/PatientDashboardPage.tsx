@@ -38,6 +38,8 @@ export function PatientDashboardPage({ onNavigate }: PatientDashboardPageProps) 
       {/* Header */}
       <PageHeader
         title="Trang chủ Bệnh nhân"
+        isPatient={true}
+        currentRoute="patient-home"
         onOpenSettings={() => onNavigate('settings')}
       />
 

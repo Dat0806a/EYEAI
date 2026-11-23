@@ -98,7 +98,6 @@ export function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFormProps) 
         await supabase.from('profiles').upsert({
           id: data.user.id,
           display_name: trimmedName,
-          role: selectedRole,
           account_type: selectedRole,
         });
 

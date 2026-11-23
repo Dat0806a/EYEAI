@@ -28,8 +28,9 @@ export const GlobalEyeHUD = memo(function GlobalEyeHUD({
   const { profile } = useAuth();
   const [isHubExpanded, setIsHubExpanded] = useState<boolean>(false);
 
-  // Do not render Camera HUD for patient accounts
-  if (profile?.account_type === 'patient') {
+  // Do not render Camera HUD for patient accounts or any patient routes
+  const isPatientRoute = typeof currentRoute === 'string' && currentRoute.startsWith('patient-');
+  if (profile?.account_type === 'patient' || isPatientRoute) {
     return null;
   }
 
