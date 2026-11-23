@@ -25,6 +25,9 @@ export const CameraPreview = memo(function CameraPreview({
     if (!video) return;
 
     if (cameraStream) {
+      video.muted = true;
+      video.defaultMuted = true;
+      video.volume = 0;
       if (video.srcObject !== cameraStream) {
         console.log('[EYE CAMERA] assigning srcObject to preview video');
         video.srcObject = cameraStream;
@@ -33,6 +36,9 @@ export const CameraPreview = memo(function CameraPreview({
         console.warn('[EYE CAMERA] preview video.play() warning:', err);
       });
     } else {
+      try {
+        video.pause();
+      } catch {}
       video.srcObject = null;
     }
   }, [cameraStream, trackingState.cameraActive]);

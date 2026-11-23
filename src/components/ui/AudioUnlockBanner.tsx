@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Volume2 } from 'lucide-react';
-import { unlockAudio, speakVietnamese, updateSpeechSettings, isIOS } from '../../utils/speech';
+import { unlockAudio, speakVietnamese, updateSpeechSettings, recoverAudioSession, isIOS } from '../../utils/speech';
+import { useEyeTrackingSettings } from '../../modules/eye-control/useEyeTracking';
 
 export function AudioUnlockBanner() {
+  const { setSpeakerEnabled } = useEyeTrackingSettings();
   const [unlocked, setUnlocked] = useState(() => {
     if (typeof window === 'undefined') return true;
     return sessionStorage.getItem('eyetalk_audio_unlocked') === 'true';
@@ -11,6 +13,7 @@ export function AudioUnlockBanner() {
   useEffect(() => {
     const handleTap = () => {
       unlockAudio();
+      recoverAudioSession();
     };
 
     window.addEventListener('pointerdown', handleTap, { passive: true });
@@ -26,10 +29,12 @@ export function AudioUnlockBanner() {
 
   const handleEnableClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // 1. Force enable speaker in settings
+    // 1. Force enable speaker in EyeTracking state and speech module
+    setSpeakerEnabled(true);
     updateSpeechSettings({ speakerEnabled: true });
     // 2. Perform deep unlock of AudioContext, WebKit speech queue, and HTMLAudioElement
     unlockAudio();
+    recoverAudioSession();
     setUnlocked(true);
     try {
       sessionStorage.setItem('eyetalk_audio_unlocked', 'true');

@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { KEYBOARD_LAYOUT } from '../modules/virtual-keyboard/keyboardLayout';
 import { applyVietnameseAccents } from '../modules/virtual-keyboard/vietnameseTelex';
 import { analyzeEyes, dist, EYE_INDICES } from '../modules/eye-control/eyeTracker';
-import { speakVietnamese } from '../utils/speech';
+import { speakVietnamese, recoverAudioSession } from '../utils/speech';
 import { GridItem, EyeCalibrationData, EyeAction, EyeTrackingState, ChatMessage } from '../types';
 import { Camera, RefreshCw, Volume2, User, Sparkles, Keyboard, KeyboardOff, Eye, Send, RotateCcw, AlertTriangle, Monitor, Play, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -352,6 +352,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
         faceDetected: false
       }));
       setSimulatorMode(true);
+      recoverAudioSession();
     } else {
       // Turn ON
       setSimulatorMode(false);
@@ -361,17 +362,25 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
         });
         
         if (videoRef.current) {
+          videoRef.current.muted = true;
+          videoRef.current.defaultMuted = true;
+          videoRef.current.volume = 0;
+          videoRef.current.setAttribute('muted', '');
+          videoRef.current.setAttribute('playsinline', '');
+          videoRef.current.setAttribute('webkit-playsinline', '');
           videoRef.current.srcObject = stream;
           videoRef.current.onloadedmetadata = () => {
-            videoRef.current?.play();
+            videoRef.current?.play().catch(() => {});
             startTrackingLoop();
           };
           setTrackingState(prev => ({ ...prev, cameraActive: true }));
+          recoverAudioSession();
         }
       } catch (err) {
         console.error('Không thể mở camera:', err);
         alert('Không khởi tạo được camera. Vui lòng xác nhận quyền truy cập máy ảnh và thử lại hoặc tiếp tục dùng chế độ Giả lập.');
         setSimulatorMode(true);
+        recoverAudioSession();
       }
     }
   };
@@ -383,10 +392,14 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
       animationFrameRef.current = null;
     }
     if (videoRef.current && videoRef.current.srcObject) {
+      try {
+        videoRef.current.pause();
+      } catch {}
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
+    recoverAudioSession();
   };
 
   useEffect(() => {

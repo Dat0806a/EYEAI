@@ -69,6 +69,11 @@ export function updateSpeechSettings(newSettings: Partial<SpeechSettings>) {
       localStorage.setItem('luckyDream.speakerEnabled', String(currentSpeechSettings.speakerEnabled));
       localStorage.setItem('luckyDream.speechVolume', String(currentSpeechSettings.speechVolume));
       localStorage.setItem('luckyDream.speechRate', String(currentSpeechSettings.speechRate));
+      window.dispatchEvent(
+        new CustomEvent('eyetalk:speech-settings-changed', {
+          detail: { ...currentSpeechSettings },
+        })
+      );
     } catch {
       // ignore
     }
@@ -161,7 +166,7 @@ export function cleanTextForSpeech(text: string): string {
 
 function getGlobalAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
-  if (!globalAudioContext) {
+  if (!globalAudioContext || globalAudioContext.state === 'closed') {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
@@ -200,6 +205,35 @@ function getSharedAudioElement(): HTMLAudioElement | null {
 }
 
 /**
+ * Automatically revives AudioContext and SpeechSynthesis after media hardware changes
+ * (e.g. camera stream started or stopped, route changes, or user navigation).
+ */
+export function recoverAudioSession() {
+  if (typeof window === 'undefined') return;
+
+  // 1. Recover Web Audio Context
+  try {
+    const ctx = getGlobalAudioContext();
+    if (ctx && (ctx.state === 'suspended' || (ctx.state as any) === 'interrupted')) {
+      ctx.resume().catch(() => {});
+    }
+  } catch (err) {
+    console.warn('AudioContext recover error:', err);
+  }
+
+  // 2. Recover Web Speech API
+  try {
+    if ('speechSynthesis' in window) {
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+    }
+  } catch (err) {
+    console.warn('SpeechSynthesis recover error:', err);
+  }
+}
+
+/**
  * Pre-unlocks audio playback contexts on initial user interaction (tuned for iOS Safari & Chrome).
  */
 export function unlockAudio() {
@@ -209,7 +243,7 @@ export function unlockAudio() {
   try {
     const ctx = getGlobalAudioContext();
     if (ctx) {
-      if (ctx.state === 'suspended') {
+      if (ctx.state === 'suspended' || (ctx.state as any) === 'interrupted') {
         ctx.resume().catch(() => {});
       }
       try {
@@ -276,17 +310,13 @@ export function unlockAudio() {
   isAudioUnlocked = true;
 }
 
-// Register global user touch/click listeners to unlock audio on interaction
+// Persistent user touch/click listener to ensure audio remains alive even after media stream changes
 if (typeof window !== 'undefined') {
   const handleUserInteraction = () => {
-    unlockAudio();
-    const ctx = getGlobalAudioContext();
-    // Only unregister listeners once audio context is genuinely running
-    if (isAudioUnlocked && ctx && ctx.state === 'running') {
-      window.removeEventListener('pointerdown', handleUserInteraction);
-      window.removeEventListener('touchstart', handleUserInteraction);
-      window.removeEventListener('click', handleUserInteraction);
-      window.removeEventListener('keydown', handleUserInteraction);
+    if (!isAudioUnlocked) {
+      unlockAudio();
+    } else {
+      recoverAudioSession();
     }
   };
 
@@ -336,10 +366,15 @@ export function stopSpeech() {
     }
   }
 
-  // Cancel Web Speech API
+  // Cancel Web Speech API only when active or pending to avoid Chromium/WebKit async cancel collision
   if ('speechSynthesis' in window) {
     try {
-      window.speechSynthesis.cancel();
+      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+        window.speechSynthesis.cancel();
+      }
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
     } catch {
       // ignore
     }
@@ -396,7 +431,10 @@ function speakNative(
       options?.onStart?.();
     };
 
+    let finished = false;
     const cleanup = () => {
+      if (finished) return;
+      finished = true;
       activeUtterances = activeUtterances.filter(u => u !== utterance);
       options?.onEnd?.();
     };
@@ -406,8 +444,8 @@ function speakNative(
 
     window.speechSynthesis.speak(utterance);
 
-    // On iOS Safari, resume if immediately paused by WebKit
-    if (isIOS && window.speechSynthesis.paused) {
+    // On iOS Safari & WebKit, unpause if immediately paused by browser
+    if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
     }
   } catch (err) {
@@ -514,13 +552,11 @@ async function playSingleChunkOnline(
   const ctx = getGlobalAudioContext();
   if (cachedBuf && ctx) {
     try {
-      if (ctx.state === 'suspended') {
+      if (ctx.state === 'suspended' || (ctx.state as any) === 'interrupted') {
         await ctx.resume().catch(() => {});
       }
-      if (ctx.state === 'running') {
-        await playAudioBuffer(ctx, cachedBuf, volume, rate, sessionId);
-        return;
-      }
+      await playAudioBuffer(ctx, cachedBuf, volume, rate, sessionId);
+      return;
     } catch {
       // proceed to fetch
     }
@@ -529,59 +565,57 @@ async function playSingleChunkOnline(
   // Strategy 2: Serverless /api/tts + Web Audio API
   if (ctx) {
     try {
-      if (ctx.state === 'suspended') {
-        await ctx.resume().catch(() => {});
-      }
+      const ttsUrl = `/api/tts?text=${encoded}`;
 
-      if (ctx.state === 'running') {
-        const ttsUrl = `/api/tts?text=${encoded}`;
+      // Create AbortController to cancel this request if user triggers a new action
+      currentFetchController = new AbortController();
+      const response = await fetch(ttsUrl, { signal: currentFetchController.signal });
+      currentFetchController = null;
 
-        // Create AbortController to cancel this request if user triggers a new action
-        currentFetchController = new AbortController();
-        const response = await fetch(ttsUrl, { signal: currentFetchController.signal });
-        currentFetchController = null;
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
 
-        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      // STRICT VALIDATION: If response is HTML or not audio, do NOT attempt decodeAudioData!
+      if (
+        response.ok &&
+        !contentType.includes('text/html') &&
+        !contentType.includes('text/plain') &&
+        (contentType.includes('audio') || contentType.includes('octet-stream'))
+      ) {
+        if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
 
-        // STRICT VALIDATION: If response is HTML or not audio, do NOT attempt decodeAudioData!
-        if (
-          response.ok &&
-          !contentType.includes('text/html') &&
-          !contentType.includes('text/plain') &&
-          (contentType.includes('audio') || contentType.includes('octet-stream'))
-        ) {
-          if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
+        const arrayBuffer = await response.arrayBuffer();
+        if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
 
-          const arrayBuffer = await response.arrayBuffer();
-          if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
+        const decodedBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
+          ctx.decodeAudioData(arrayBuffer.slice(0), resolve, reject);
+        });
 
-          const decodedBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
-            ctx.decodeAudioData(arrayBuffer.slice(0), resolve, reject);
-          });
-
-          if (audioBufferCache.size < 60) {
-            audioBufferCache.set(chunk, decodedBuffer);
-          }
-
-          if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
-          await playAudioBuffer(ctx, decodedBuffer, volume, rate, sessionId);
-          return; // Successfully played chunk via Web Audio API!
+        if (audioBufferCache.size < 60) {
+          audioBufferCache.set(chunk, decodedBuffer);
         }
+
+        if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
+        if (ctx.state === 'suspended' || (ctx.state as any) === 'interrupted') {
+          await ctx.resume().catch(() => {});
+        }
+        await playAudioBuffer(ctx, decodedBuffer, volume, rate, sessionId);
+        return; // Successfully played chunk via Web Audio API!
       }
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
-      // proceed to Direct Google fallback
+      // proceed to HTMLAudioElement fallback
     }
   }
 
-  // Strategy 3: Direct Google Translate TTS via HTMLAudioElement with no-referrer
+  // Strategy 3: Serverless /api/tts via HTMLAudioElement fallback
   const audio = getSharedAudioElement();
   if (audio) {
     try {
       audio.playbackRate = rate;
       audio.volume = volume;
 
-      const directTtsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encoded}`;
+      // Primary fallback: Netlify /api/tts serverless function (safe proxy, no CORS/Referrer issues)
+      const ttsProxyUrl = `/api/tts?text=${encoded}`;
 
       await new Promise<void>((resolve, reject) => {
         let finished = false;
@@ -602,7 +636,7 @@ async function playSingleChunkOnline(
           reject(e);
         };
 
-        audio.src = directTtsUrl;
+        audio.src = ttsProxyUrl;
         const playPromise = audio.play();
         if (playPromise !== undefined) {
           playPromise.catch((err) => {
@@ -684,8 +718,8 @@ export function speakVietnamese(
     return;
   }
 
-  // Ensure audio contexts are unlocked
-  unlockAudio();
+  // Ensure audio contexts and speech synthesis are awake
+  recoverAudioSession();
 
   // Stop any active speech before starting new speech
   stopSpeech();

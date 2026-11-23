@@ -9,7 +9,7 @@ import {
   OverlayDisplaySettings,
 } from './types';
 import { analyzeEyes, Point } from './eyeTracker';
-import { speakVietnamese, updateSpeechSettings } from '../../utils/speech';
+import { speakVietnamese, updateSpeechSettings, recoverAudioSession } from '../../utils/speech';
 
 export interface EyeTrackingSettingsContextType {
   settings: EyeControlSettings;
@@ -123,13 +123,37 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return { ...base, ...parsed };
+        const resolvedSpeaker =
+          savedSpeakerEnabled !== null
+            ? savedSpeakerEnabled === 'true'
+            : (parsed.speakerEnabled !== undefined ? parsed.speakerEnabled : true);
+        return {
+          ...base,
+          ...parsed,
+          speakerEnabled: resolvedSpeaker,
+        };
       } catch (e) {
         // Fallback
       }
     }
     return base;
   });
+
+  // Synchronize speakerEnabled if changed externally (e.g. via AudioUnlockBanner or speech module)
+  useEffect(() => {
+    const handleSpeechSync = (e: any) => {
+      if (e?.detail && typeof e.detail.speakerEnabled === 'boolean') {
+        setSettings(prev => {
+          if (prev.speakerEnabled !== e.detail.speakerEnabled) {
+            return { ...prev, speakerEnabled: e.detail.speakerEnabled };
+          }
+          return prev;
+        });
+      }
+    };
+    window.addEventListener('eyetalk:speech-settings-changed', handleSpeechSync);
+    return () => window.removeEventListener('eyetalk:speech-settings-changed', handleSpeechSync);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('luckydream_eye_settings', JSON.stringify(settings));
@@ -1475,6 +1499,9 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       setCameraStream(null);
     }
     if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+      } catch {}
       videoRef.current.srcObject = null;
     }
     const stoppedState: EyeTrackingState = {
@@ -1488,6 +1515,9 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     };
     latestTelemetryRef.current = stoppedState;
     setTrackingState(stoppedState);
+
+    // Auto-revive audio session after camera stream teardown
+    recoverAudioSession();
   }, []);
 
   const startCamera = useCallback(async () => {
@@ -1515,6 +1545,9 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       const activeTracks = mediaStreamRef.current.getVideoTracks().filter(t => t.readyState === 'live');
       if (activeTracks.length > 0) {
         if (videoRef.current) {
+          videoRef.current.muted = true;
+          videoRef.current.defaultMuted = true;
+          videoRef.current.volume = 0;
           if (videoRef.current.srcObject !== mediaStreamRef.current) {
             videoRef.current.srcObject = mediaStreamRef.current;
           }
@@ -1528,6 +1561,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         const activeState = { ...latestTelemetryRef.current, cameraActive: true, cameraError: null };
         latestTelemetryRef.current = activeState;
         setTrackingState(activeState);
+        recoverAudioSession();
         return;
       }
     }
@@ -1564,19 +1598,33 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
 
       initFramesCount.current = 0;
       if (videoRef.current) {
+        videoRef.current.muted = true;
+        videoRef.current.defaultMuted = true;
+        videoRef.current.volume = 0;
+        videoRef.current.setAttribute('muted', '');
+        videoRef.current.setAttribute('playsinline', '');
+        videoRef.current.setAttribute('webkit-playsinline', '');
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        try {
+          await videoRef.current.play();
+        } catch (e) {
+          console.warn('[EYE CAMERA] video.play() notice:', e);
+        }
         startTrackingLoop();
       }
 
       const readyState = { ...latestTelemetryRef.current, cameraActive: true, cameraError: null };
       latestTelemetryRef.current = readyState;
       setTrackingState(readyState);
+
+      // Auto-revive audio session after camera stream activation
+      recoverAudioSession();
     } catch (err: any) {
       const errMsg = err.message || 'Không thể truy cập camera. Vui lòng cấp quyền camera.';
       const errState = { ...latestTelemetryRef.current, cameraActive: false, cameraError: errMsg };
       latestTelemetryRef.current = errState;
       setTrackingState(errState);
+      recoverAudioSession();
     }
   }, [startTrackingLoop]);
 
@@ -1586,6 +1634,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     } else {
       await startCamera();
     }
+    recoverAudioSession();
   }, [startCamera, stopTrackingLoop]);
 
   useEffect(() => {
@@ -1871,6 +1920,9 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   const setEyeControlEnabled = useCallback((enabled: boolean) => {
     localStorage.setItem('luckydream_eye_enabled', String(enabled));
     setSettings(prev => ({ ...prev, eyeControlEnabled: enabled }));
+    setTimeout(() => {
+      recoverAudioSession();
+    }, 50);
   }, []);
 
   const setSimulatorMode = useCallback((enabled: boolean) => {
