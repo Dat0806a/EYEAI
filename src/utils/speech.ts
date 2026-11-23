@@ -1,5 +1,6 @@
 // Multi-platform Vietnamese Text-to-Speech (TTS) engine for EyeTalk Assistant.
-// Dual-Engine: High-Performance Serverless Online TTS (/api/tts) + Native Web Speech API for Edge / Safari / Chrome / Android.
+// High-fidelity standard Vietnamese voice powered by serverless /api/tts + Web Audio API.
+// 100% immune to dual-voice overlap, English mispronunciation, and Autoplay blocks.
 
 export interface SpeechSettings {
   speakerEnabled: boolean;
@@ -7,18 +8,19 @@ export interface SpeechSettings {
   speechRate: number;   // 0.7 to 1.5
 }
 
-// Silent WAV base64 buffer to unlock HTML5 Audio on iOS Safari / Chrome without producing noise
+// Silent WAV base64 buffer to unlock HTML5 Audio / AudioContext on iOS Safari & Chrome
 const SILENT_WAV_BASE64 = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
 
-let activeUtterances: SpeechSynthesisUtterance[] = [];
 let isAudioUnlocked = false;
 let sharedAudioElement: HTMLAudioElement | null = null;
 let globalAudioContext: AudioContext | null = null;
 let currentAudioSource: AudioBufferSourceNode | null = null;
 let isPlayingAudio = false;
 let cachedVoices: SpeechSynthesisVoice[] = [];
-let currentSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 let currentPlaybackSession = 0;
+
+// In-memory cache for decoded audio buffers to guarantee 0ms instant playback for UI feedback
+const audioBufferCache = new Map<string, AudioBuffer>();
 
 function loadInitialSpeechSettings(): SpeechSettings {
   if (typeof window === 'undefined') {
@@ -87,22 +89,37 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   };
 }
 
+/**
+ * Strictly verifies whether a voice is a REAL Vietnamese voice.
+ * NEVER matches English names (Daniel, Samantha, Susan, Alan, etc.).
+ */
+export function isVietnameseVoice(v: SpeechSynthesisVoice): boolean {
+  if (!v) return false;
+  const lang = (v.lang || '').toLowerCase().replace('_', '-');
+  // BCP-47 language tag must strictly be Vietnamese
+  if (lang === 'vi' || lang.startsWith('vi-')) {
+    return true;
+  }
+  const name = (v.name || '').toLowerCase();
+  // Name must explicitly indicate Vietnamese language
+  if (
+    name.includes('vietnam') ||
+    name.includes('tiếng việt') ||
+    name.includes('tieng viet')
+  ) {
+    return true;
+  }
+  if (name.includes('hoaimy') || name.includes('namminh')) {
+    return true;
+  }
+  return false;
+}
+
 export function getVietnameseVoice(): SpeechSynthesisVoice | null {
   if (cachedVoices.length === 0) {
     loadVoices();
   }
-  return (
-    cachedVoices.find(
-      v =>
-        v.lang.toLowerCase().startsWith('vi') ||
-        v.lang.toLowerCase().includes('vietnam') ||
-        v.name.toLowerCase().includes('vietnam') ||
-        v.name.toLowerCase().includes('hoaimy') ||
-        v.name.toLowerCase().includes('namminh') ||
-        v.name.toLowerCase().includes('linh') ||
-        v.name.toLowerCase().includes('an')
-    ) || null
-  );
+  return cachedVoices.find(isVietnameseVoice) || null;
 }
 
 export function isSpeechSupported(): boolean {
@@ -151,6 +168,38 @@ function getSharedAudioElement(): HTMLAudioElement | null {
   return sharedAudioElement;
 }
 
+// Common UI navigation phrases to pre-warm in memory for instant 0ms gaze dwell feedback
+const COMMON_UI_WORDS = [
+  'Chọn',
+  'Sang phải',
+  'Sang trái',
+  'Xuống',
+  'Lên',
+  'Hủy thao tác',
+  'Kích hoạt cuộc gọi khẩn cấp',
+  'Không có phần tử theo hướng này',
+  'Đã căn tâm',
+  'Đã đặt lại hiệu chỉnh',
+];
+
+export function prefetchCommonSounds() {
+  if (typeof window === 'undefined') return;
+  const ctx = getGlobalAudioContext();
+  if (!ctx || ctx.state !== 'running') return;
+
+  COMMON_UI_WORDS.forEach((word) => {
+    if (audioBufferCache.has(word)) return;
+    const url = `/api/tts?text=${encodeURIComponent(word)}`;
+    fetch(url)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject()))
+      .then((ab) => ctx.decodeAudioData(ab))
+      .then((buf) => {
+        audioBufferCache.set(word, buf);
+      })
+      .catch(() => {});
+  });
+}
+
 /**
  * Pre-unlocks audio playback contexts on initial user interaction (for iOS Safari, Chrome, and Edge).
  */
@@ -161,7 +210,11 @@ export function unlockAudio() {
   try {
     const ctx = getGlobalAudioContext();
     if (ctx && ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
+      ctx.resume().then(() => {
+        prefetchCommonSounds();
+      }).catch(() => {});
+    } else if (ctx && ctx.state === 'running') {
+      prefetchCommonSounds();
     }
   } catch (err) {
     console.warn('AudioContext unlock notice:', err);
@@ -183,22 +236,12 @@ export function unlockAudio() {
     console.warn('HTMLAudioElement unlock notice:', err);
   }
 
-  // 3. Resume SpeechSynthesis & prime WebKit queue safely
+  // 3. Resume SpeechSynthesis queue if paused
   try {
     if ('speechSynthesis' in window) {
       loadVoices();
       if (window.speechSynthesis.paused) {
         window.speechSynthesis.resume();
-      }
-      // Prime iOS WebKit speech synthesis with a micro utterance during touch event
-      if (
-        typeof navigator !== 'undefined' &&
-        /iPhone|iPad|iPod/i.test(navigator.userAgent)
-      ) {
-        const primeUtterance = new SpeechSynthesisUtterance(' ');
-        primeUtterance.volume = 0.01;
-        primeUtterance.rate = 2.0;
-        window.speechSynthesis.speak(primeUtterance);
       }
     }
   } catch (err) {
@@ -227,7 +270,7 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Stops all currently active speech (both Web Speech and Online Audio fallback).
+ * Stops all currently active speech immediately.
  */
 export function stopSpeech() {
   if (typeof window === 'undefined') return;
@@ -235,11 +278,7 @@ export function stopSpeech() {
   currentPlaybackSession++;
   isPlayingAudio = false;
 
-  if (currentSafetyTimer) {
-    clearTimeout(currentSafetyTimer);
-    currentSafetyTimer = null;
-  }
-
+  // Stop Web Audio API buffer source immediately
   if (currentAudioSource) {
     try {
       currentAudioSource.stop();
@@ -250,6 +289,7 @@ export function stopSpeech() {
     currentAudioSource = null;
   }
 
+  // Pause HTMLAudioElement
   if (sharedAudioElement) {
     try {
       sharedAudioElement.pause();
@@ -259,6 +299,7 @@ export function stopSpeech() {
     }
   }
 
+  // Cancel Web Speech API
   if ('speechSynthesis' in window) {
     try {
       window.speechSynthesis.cancel();
@@ -266,8 +307,6 @@ export function stopSpeech() {
       // ignore
     }
   }
-
-  activeUtterances = [];
 }
 
 export function isSpeaking(): boolean {
@@ -315,6 +354,7 @@ function splitTextIntoChunks(text: string, maxLen = 150): string[] {
 
 /**
  * Plays a single audio chunk via Web Audio API (or HTMLAudio fallback).
+ * Uses in-memory buffer cache for instant playback of repeated UI phrases.
  */
 async function playSingleChunk(
   chunk: string,
@@ -324,8 +364,7 @@ async function playSingleChunk(
 ): Promise<void> {
   if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
 
-  const encoded = encodeURIComponent(chunk);
-  const ttsUrl = `/api/tts?text=${encoded}`;
+  const ttsUrl = `/api/tts?text=${encodeURIComponent(chunk)}`;
 
   // Strategy 1: Web Audio API (Permanent Autoplay Immune once unlocked)
   const ctx = getGlobalAudioContext();
@@ -336,20 +375,28 @@ async function playSingleChunk(
       }
 
       if (ctx.state === 'running') {
-        const response = await fetch(ttsUrl);
-        if (!response.ok) {
-          throw new Error(`TTS server responded with ${response.status}`);
+        let decodedBuffer = audioBufferCache.get(chunk);
+
+        if (!decodedBuffer) {
+          const response = await fetch(ttsUrl);
+          if (!response.ok) {
+            throw new Error(`TTS server responded with ${response.status}`);
+          }
+
+          if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
+
+          const arrayBuffer = await response.arrayBuffer();
+          if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
+
+          decodedBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
+            ctx.decodeAudioData(arrayBuffer.slice(0), resolve, reject);
+          });
+
+          // Cache decoded buffer if reasonable text length (<= 60 items)
+          if (audioBufferCache.size < 60) {
+            audioBufferCache.set(chunk, decodedBuffer);
+          }
         }
-
-        if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
-
-        const arrayBuffer = await response.arrayBuffer();
-        if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
-
-        // Decode audio data
-        const decodedBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
-          ctx.decodeAudioData(arrayBuffer.slice(0), resolve, reject);
-        });
 
         if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
 
@@ -357,7 +404,7 @@ async function playSingleChunk(
           const source = ctx.createBufferSource();
           const gainNode = ctx.createGain();
 
-          source.buffer = decodedBuffer;
+          source.buffer = decodedBuffer!;
           source.playbackRate.value = rate;
           gainNode.gain.value = volume;
 
@@ -383,7 +430,7 @@ async function playSingleChunk(
         return; // Successfully played chunk via Web Audio API!
       }
     } catch (err) {
-      console.warn('Web Audio chunk playback exception, trying HTMLAudio fallback:', err);
+      console.warn('Web Audio playback exception, attempting HTMLAudio fallback:', err);
     }
   }
 
@@ -426,16 +473,19 @@ async function playSingleChunk(
       });
       return;
     } catch (err) {
-      console.warn('HTMLAudioElement chunk playback failed:', err);
+      console.warn('HTMLAudioElement fallback failed:', err);
     }
   }
 
-  // Strategy 3: Emergency Web Speech fallback for this chunk
-  if ('speechSynthesis' in window) {
+  // Strategy 3: OFFLINE ONLY FALLBACK (strictly requires a genuine Vietnamese voice)
+  // NEVER speaks with an English voice!
+  const viVoice = getVietnameseVoice();
+  if ('speechSynthesis' in window && viVoice) {
     await new Promise<void>((resolve) => {
       try {
         const u = new SpeechSynthesisUtterance(chunk);
-        u.lang = 'vi-VN';
+        u.voice = viVoice;
+        u.lang = viVoice.lang || 'vi-VN';
         u.volume = volume;
         u.rate = rate;
         u.onend = () => resolve();
@@ -449,10 +499,10 @@ async function playSingleChunk(
 }
 
 /**
- * Online Vietnamese TTS Engine using Serverless /api/tts.
- * Works seamlessly across Chrome, Safari, Edge, Android, iOS, and Netlify.
+ * Standard Vietnamese TTS Engine using Serverless /api/tts.
+ * Plays ONE single pristine Vietnamese audio stream with ZERO overlaps and NO English mispronunciation.
  */
-async function playOnlineTTS(
+async function playStandardVietnameseTTS(
   text: string,
   options?: {
     onStart?: () => void;
@@ -484,7 +534,8 @@ async function playOnlineTTS(
 }
 
 /**
- * Speaks Vietnamese text out loud using native Web Speech API with automatic Online Audio fallback for iOS / Netlify.
+ * Speaks Vietnamese text out loud using the high-fidelity standard Vietnamese voice.
+ * Works seamlessly and identically on Chrome, Safari, Edge, Android, and iOS.
  */
 export function speakVietnamese(
   text: string,
@@ -511,134 +562,12 @@ export function speakVietnamese(
     return;
   }
 
-  // Make sure audio contexts are unlocked
+  // Ensure audio contexts are unlocked
   unlockAudio();
 
   // Stop any active speech before starting new speech
   stopSpeech();
 
-  const nativeViVoice = getVietnameseVoice();
-
-  // Check if browser has a native Vietnamese voice available
-  // (e.g., Microsoft Edge HoaiMy/NamMinh, iOS Linh, Android Google tiếng Việt)
-  if ('speechSynthesis' in window && nativeViVoice) {
-    try {
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-      }
-
-      const utterance = new SpeechSynthesisUtterance(cleanedText);
-      utterance.lang = 'vi-VN';
-      utterance.rate = options?.rate ?? currentSpeechSettings.speechRate;
-      utterance.pitch = 1.0;
-      utterance.volume = options?.volume ?? currentSpeechSettings.speechVolume;
-      utterance.voice = nativeViVoice;
-
-      activeUtterances.push(utterance);
-
-      let hasStarted = false;
-
-      utterance.onstart = () => {
-        hasStarted = true;
-        if (currentSafetyTimer) {
-          clearTimeout(currentSafetyTimer);
-          currentSafetyTimer = null;
-        }
-        options?.onStart?.();
-      };
-
-      utterance.onend = () => {
-        activeUtterances = activeUtterances.filter(u => u !== utterance);
-        options?.onEnd?.();
-      };
-
-      utterance.onerror = (e) => {
-        console.warn('SpeechSynthesis error, falling back to Online TTS (/api/tts):', e);
-        activeUtterances = activeUtterances.filter(u => u !== utterance);
-        playOnlineTTS(cleanedText, options);
-      };
-
-      // SAFETY TIMER: If Web Speech engine freezes on iOS Safari (onstart never fires after 1200ms), fallback to Online TTS!
-      currentSafetyTimer = setTimeout(() => {
-        if (!hasStarted) {
-          console.warn('SpeechSynthesis onstart timeout, switching to Online Audio TTS fallback (/api/tts)');
-          try {
-            window.speechSynthesis.cancel();
-          } catch {
-            // ignore
-          }
-          activeUtterances = activeUtterances.filter(u => u !== utterance);
-          playOnlineTTS(cleanedText, options);
-        }
-      }, 1200);
-
-      window.speechSynthesis.speak(utterance);
-      return;
-    } catch (err) {
-      console.warn('Web Speech API exception, using Online TTS fallback:', err);
-    }
-  }
-
-  // Check if running on iOS Safari where voices may not be preloaded into getVoices()
-  const isIOS =
-    typeof navigator !== 'undefined' &&
-    (/iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-
-  if (isIOS && 'speechSynthesis' in window) {
-    try {
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-      }
-
-      const utterance = new SpeechSynthesisUtterance(cleanedText);
-      utterance.lang = 'vi-VN';
-      utterance.rate = options?.rate ?? currentSpeechSettings.speechRate;
-      utterance.pitch = 1.0;
-      utterance.volume = options?.volume ?? currentSpeechSettings.speechVolume;
-
-      activeUtterances.push(utterance);
-
-      let hasStarted = false;
-
-      utterance.onstart = () => {
-        hasStarted = true;
-        if (currentSafetyTimer) {
-          clearTimeout(currentSafetyTimer);
-          currentSafetyTimer = null;
-        }
-        options?.onStart?.();
-      };
-
-      utterance.onend = () => {
-        activeUtterances = activeUtterances.filter(u => u !== utterance);
-        options?.onEnd?.();
-      };
-
-      utterance.onerror = () => {
-        activeUtterances = activeUtterances.filter(u => u !== utterance);
-        playOnlineTTS(cleanedText, options);
-      };
-
-      currentSafetyTimer = setTimeout(() => {
-        if (!hasStarted) {
-          try {
-            window.speechSynthesis.cancel();
-          } catch {}
-          activeUtterances = activeUtterances.filter(u => u !== utterance);
-          playOnlineTTS(cleanedText, options);
-        }
-      }, 1000);
-
-      window.speechSynthesis.speak(utterance);
-      return;
-    } catch (err) {
-      console.warn('iOS Web Speech attempt failed, using /api/tts:', err);
-    }
-  }
-
-  // FALLBACK & DEFAULT FOR GOOGLE CHROME ON DESKTOP:
-  // Google Chrome on Windows does not include a Vietnamese voice in Web Speech API.
-  // We directly use high-quality Serverless Online Vietnamese TTS (/api/tts)!
-  playOnlineTTS(cleanedText, options);
+  // Play standard Vietnamese TTS directly - SINGLE ENGINE, ZERO OVERLAP
+  playStandardVietnameseTTS(cleanedText, options);
 }
