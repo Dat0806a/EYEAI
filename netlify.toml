@@ -10,6 +10,7 @@
   from = "/api/tts"
   to = "/.netlify/functions/tts"
   status = 200
+  force = true
 
 # 2. SPA Fallback routing
 [[redirects]]

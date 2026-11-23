@@ -1,6 +1,8 @@
 // Multi-platform Vietnamese Text-to-Speech (TTS) engine for EyeTalk Assistant.
-// High-fidelity standard Vietnamese voice powered by serverless /api/tts + Web Audio API.
-// 100% immune to dual-voice overlap, English mispronunciation, and Autoplay blocks.
+// High-fidelity standard Vietnamese voice with resilient 3-Tier fallback:
+// Tier 1: Serverless /api/tts decoded via Web Audio API (with Content-Type validation to prevent EncodingError).
+// Tier 2: Direct Google Translate TTS with document-level no-referrer.
+// Tier 3: Verified native Vietnamese Web Speech voice (Edge HoaiMy / Android Google tiếng Việt / iOS Linh).
 
 export interface SpeechSettings {
   speakerEnabled: boolean;
@@ -158,9 +160,20 @@ function getSharedAudioElement(): HTMLAudioElement | null {
   if (typeof window === 'undefined') return null;
   if (!sharedAudioElement && typeof Audio !== 'undefined') {
     try {
-      sharedAudioElement = new Audio();
+      let existing = document.getElementById('eyetalk-shared-audio') as HTMLAudioElement | null;
+      if (!existing && typeof document !== 'undefined' && document.body) {
+        existing = document.createElement('audio');
+        existing.id = 'eyetalk-shared-audio';
+        existing.setAttribute('playsinline', 'true');
+        existing.setAttribute('webkit-playsinline', 'true');
+        existing.setAttribute('referrerpolicy', 'no-referrer');
+        existing.style.display = 'none';
+        document.body.appendChild(existing);
+      }
+      sharedAudioElement = existing || new Audio();
       sharedAudioElement.setAttribute('playsinline', 'true');
       sharedAudioElement.setAttribute('webkit-playsinline', 'true');
+      sharedAudioElement.setAttribute('referrerpolicy', 'no-referrer');
     } catch (e) {
       console.warn('Cannot initialize shared HTMLAudioElement:', e);
     }
@@ -191,7 +204,13 @@ export function prefetchCommonSounds() {
     if (audioBufferCache.has(word)) return;
     const url = `/api/tts?text=${encodeURIComponent(word)}`;
     fetch(url)
-      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject()))
+      .then((r) => {
+        const ct = r.headers.get('content-type') || '';
+        if (r.ok && !ct.includes('text/html') && (ct.includes('audio') || ct.includes('octet-stream'))) {
+          return r.arrayBuffer();
+        }
+        return Promise.reject();
+      })
       .then((ab) => ctx.decodeAudioData(ab))
       .then((buf) => {
         audioBufferCache.set(word, buf);
@@ -353,8 +372,53 @@ function splitTextIntoChunks(text: string, maxLen = 150): string[] {
 }
 
 /**
- * Plays a single audio chunk via Web Audio API (or HTMLAudio fallback).
- * Uses in-memory buffer cache for instant playback of repeated UI phrases.
+ * Helper to play an AudioBuffer through Web Audio API
+ */
+function playAudioBuffer(
+  ctx: AudioContext,
+  buffer: AudioBuffer,
+  volume: number,
+  rate: number,
+  sessionId: number
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (!isPlayingAudio || sessionId !== currentPlaybackSession) {
+      resolve();
+      return;
+    }
+
+    const source = ctx.createBufferSource();
+    const gainNode = ctx.createGain();
+
+    source.buffer = buffer;
+    source.playbackRate.value = rate;
+    gainNode.gain.value = volume;
+
+    source.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    currentAudioSource = source;
+
+    source.onended = () => {
+      if (currentAudioSource === source) {
+        currentAudioSource = null;
+      }
+      resolve();
+    };
+
+    try {
+      source.start(0);
+    } catch {
+      resolve();
+    }
+  });
+}
+
+/**
+ * Plays a single audio chunk with 3-tier resilient fallback:
+ * Tier 1: Web Audio API via /api/tts (validating Content-Type to prevent EncodingError on HTML responses).
+ * Tier 2: Direct Google Translate TTS via HTMLAudioElement (using document-level no-referrer).
+ * Tier 3: Verified native Vietnamese Web Speech voice.
  */
 async function playSingleChunk(
   chunk: string,
@@ -364,10 +428,27 @@ async function playSingleChunk(
 ): Promise<void> {
   if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
 
-  const ttsUrl = `/api/tts?text=${encodeURIComponent(chunk)}`;
+  const encoded = encodeURIComponent(chunk);
 
-  // Strategy 1: Web Audio API (Permanent Autoplay Immune once unlocked)
+  // Strategy 1: Check in-memory AudioBuffer cache (0ms instant playback for UI feedback)
+  const cachedBuf = audioBufferCache.get(chunk);
   const ctx = getGlobalAudioContext();
+  if (cachedBuf && ctx) {
+    try {
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
+      if (ctx.state === 'running') {
+        await playAudioBuffer(ctx, cachedBuf, volume, rate, sessionId);
+        return;
+      }
+    } catch {
+      // proceed to tier 1
+    }
+  }
+
+  // Strategy 2 (Tier 1): Serverless /api/tts + Web Audio API
+  // VALIDATES Content-Type to strictly prevent passing HTML (index.html) to decodeAudioData!
   if (ctx) {
     try {
       if (ctx.state === 'suspended') {
@@ -375,71 +456,49 @@ async function playSingleChunk(
       }
 
       if (ctx.state === 'running') {
-        let decodedBuffer = audioBufferCache.get(chunk);
+        const ttsUrl = `/api/tts?text=${encoded}`;
+        const response = await fetch(ttsUrl);
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
 
-        if (!decodedBuffer) {
-          const response = await fetch(ttsUrl);
-          if (!response.ok) {
-            throw new Error(`TTS server responded with ${response.status}`);
-          }
-
+        // STRICT VALIDATION: If response is HTML or not audio, do NOT attempt decodeAudioData!
+        if (
+          response.ok &&
+          !contentType.includes('text/html') &&
+          !contentType.includes('text/plain') &&
+          (contentType.includes('audio') || contentType.includes('octet-stream'))
+        ) {
           if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
 
           const arrayBuffer = await response.arrayBuffer();
           if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
 
-          decodedBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
+          const decodedBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
             ctx.decodeAudioData(arrayBuffer.slice(0), resolve, reject);
           });
 
-          // Cache decoded buffer if reasonable text length (<= 60 items)
           if (audioBufferCache.size < 60) {
             audioBufferCache.set(chunk, decodedBuffer);
           }
+
+          if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
+          await playAudioBuffer(ctx, decodedBuffer, volume, rate, sessionId);
+          return; // Successfully played chunk via Web Audio API!
         }
-
-        if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
-
-        await new Promise<void>((resolve) => {
-          const source = ctx.createBufferSource();
-          const gainNode = ctx.createGain();
-
-          source.buffer = decodedBuffer!;
-          source.playbackRate.value = rate;
-          gainNode.gain.value = volume;
-
-          source.connect(gainNode);
-          gainNode.connect(ctx.destination);
-
-          currentAudioSource = source;
-
-          source.onended = () => {
-            if (currentAudioSource === source) {
-              currentAudioSource = null;
-            }
-            resolve();
-          };
-
-          try {
-            source.start(0);
-          } catch {
-            resolve();
-          }
-        });
-
-        return; // Successfully played chunk via Web Audio API!
       }
-    } catch (err) {
-      console.warn('Web Audio playback exception, attempting HTMLAudio fallback:', err);
+    } catch {
+      // Tier 1 unavailable, smoothly proceed to Tier 2
     }
   }
 
-  // Strategy 2: HTMLAudioElement fallback
+  // Strategy 3 (Tier 2): Direct Google Translate TTS via HTMLAudioElement
+  // Powered by <meta name="referrer" content="no-referrer"> in index.html (no 404 blocked referer!)
   const audio = getSharedAudioElement();
   if (audio) {
     try {
       audio.playbackRate = rate;
       audio.volume = volume;
+
+      const directTtsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encoded}`;
 
       await new Promise<void>((resolve, reject) => {
         let finished = false;
@@ -460,7 +519,7 @@ async function playSingleChunk(
           reject(e);
         };
 
-        audio.src = ttsUrl;
+        audio.src = directTtsUrl;
         const playPromise = audio.play();
         if (playPromise !== undefined) {
           playPromise.catch((err) => {
@@ -471,14 +530,13 @@ async function playSingleChunk(
           });
         }
       });
-      return;
-    } catch (err) {
-      console.warn('HTMLAudioElement fallback failed:', err);
+      return; // Successfully played chunk via Direct Google TTS!
+    } catch {
+      // proceed to Tier 3
     }
   }
 
-  // Strategy 3: OFFLINE ONLY FALLBACK (strictly requires a genuine Vietnamese voice)
-  // NEVER speaks with an English voice!
+  // Strategy 4 (Tier 3): Verified Vietnamese Web Speech voice (ONLY genuine Vietnamese, NEVER English)
   const viVoice = getVietnameseVoice();
   if ('speechSynthesis' in window && viVoice) {
     await new Promise<void>((resolve) => {
@@ -499,7 +557,7 @@ async function playSingleChunk(
 }
 
 /**
- * Standard Vietnamese TTS Engine using Serverless /api/tts.
+ * Standard Vietnamese TTS Engine using Serverless /api/tts & Direct Google Fallback.
  * Plays ONE single pristine Vietnamese audio stream with ZERO overlaps and NO English mispronunciation.
  */
 async function playStandardVietnameseTTS(
