@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Volume2, VolumeX } from 'lucide-react';
-import { unlockAudio, speakVietnamese, updateSpeechSettings, getSpeechSettings } from '../../utils/speech';
+import { Volume2 } from 'lucide-react';
+import { unlockAudio, speakVietnamese, updateSpeechSettings, isIOS } from '../../utils/speech';
 
 export function AudioUnlockBanner() {
   const [unlocked, setUnlocked] = useState(() => {
@@ -36,9 +36,8 @@ export function AudioUnlockBanner() {
     } catch {}
 
     // 3. Play friendly greeting sound to confirm audio is working
-    setTimeout(() => {
-      speakVietnamese('Âm thanh trợ lý EyeTalk đã sẵn sàng');
-    }, 150);
+    // Synchronous execution ensures user gesture activation on iOS Safari!
+    speakVietnamese('Âm thanh trợ lý EyeTalk đã sẵn sàng');
   };
 
   if (unlocked) return null;
@@ -52,7 +51,9 @@ export function AudioUnlockBanner() {
       >
         <div className="flex items-center gap-2 min-w-0">
           <Volume2 className="w-5 h-5 text-[#6AC9F0] animate-pulse flex-shrink-0" />
-          <span className="truncate">Chạm vào đây để bật Giọng Nói (Chrome / Safari / iPhone)</span>
+          <span className="truncate">
+            {isIOS ? 'Chạm vào đây để bật Giọng Nói trên iPhone' : 'Chạm vào đây để bật Giọng Nói'}
+          </span>
         </div>
         <span className="bg-[#6AC9F0] text-[#14213D] px-2.5 py-1 rounded-full text-[11px] font-black uppercase flex-shrink-0 shadow-xs">
           BẬT LOA

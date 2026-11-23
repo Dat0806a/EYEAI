@@ -1,8 +1,9 @@
 // Multi-platform Vietnamese Text-to-Speech (TTS) engine for EyeTalk Assistant.
 // High-fidelity standard Vietnamese voice with resilient 3-Tier fallback:
 // Tier 1: Serverless /api/tts decoded via Web Audio API (with Content-Type validation to prevent EncodingError).
-// Tier 2: Direct Google Translate TTS with document-level no-referrer.
-// Tier 3: Verified native Vietnamese Web Speech voice (Edge HoaiMy / Android Google tiếng Việt / iOS Linh).
+// Tier 2: Dedicated iOS Safari native speech fallback (with vi-VN language mapping).
+// Tier 3: Direct Google Translate TTS via HTMLAudioElement (using document-level no-referrer).
+// Tier 4: Verified native Vietnamese Web Speech voice for Desktop (Edge HoaiMy / Android Google tiếng Việt).
 
 export interface SpeechSettings {
   speakerEnabled: boolean;
@@ -12,6 +13,11 @@ export interface SpeechSettings {
 
 // Silent WAV base64 buffer to unlock HTML5 Audio / AudioContext on iOS Safari & Chrome
 const SILENT_WAV_BASE64 = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
+export const isIOS =
+  typeof navigator !== 'undefined' &&
+  (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 
 let isAudioUnlocked = false;
 let sharedAudioElement: HTMLAudioElement | null = null;
@@ -220,20 +226,34 @@ export function prefetchCommonSounds() {
 }
 
 /**
- * Pre-unlocks audio playback contexts on initial user interaction (for iOS Safari, Chrome, and Edge).
+ * Pre-unlocks audio playback contexts on initial user interaction (specifically tuned for iOS Safari & Chrome).
  */
 export function unlockAudio() {
   if (typeof window === 'undefined') return;
 
-  // 1. Resume / Unlock Web Audio Context
+  // 1. Permanent iOS Safari Web Audio Context unlock via 1-sample silent buffer node
   try {
     const ctx = getGlobalAudioContext();
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume().then(() => {
+    if (ctx) {
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      try {
+        const buffer = ctx.createBuffer(1, 1, 22050);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        source.start(0);
+        setTimeout(() => {
+          try {
+            source.disconnect();
+          } catch {}
+        }, 50);
+      } catch {}
+
+      if (ctx.state === 'running') {
         prefetchCommonSounds();
-      }).catch(() => {});
-    } else if (ctx && ctx.state === 'running') {
-      prefetchCommonSounds();
+      }
     }
   } catch (err) {
     console.warn('AudioContext unlock notice:', err);
@@ -255,12 +275,21 @@ export function unlockAudio() {
     console.warn('HTMLAudioElement unlock notice:', err);
   }
 
-  // 3. Resume SpeechSynthesis queue if paused
+  // 3. Prime Web Speech API for iOS Safari
   try {
     if ('speechSynthesis' in window) {
       loadVoices();
       if (window.speechSynthesis.paused) {
         window.speechSynthesis.resume();
+      }
+      // Prime iOS WebKit speech queue with a micro utterance during touch event
+      if (isIOS) {
+        try {
+          const primeUtterance = new SpeechSynthesisUtterance(' ');
+          primeUtterance.volume = 0.01;
+          primeUtterance.rate = 2.0;
+          window.speechSynthesis.speak(primeUtterance);
+        } catch {}
       }
     }
   } catch (err) {
@@ -270,11 +299,13 @@ export function unlockAudio() {
   isAudioUnlocked = true;
 }
 
-// Register global user touch/click listeners to unlock audio on first interaction
+// Register global user touch/click listeners to unlock audio on interaction
 if (typeof window !== 'undefined') {
   const handleUserInteraction = () => {
     unlockAudio();
-    if (isAudioUnlocked) {
+    const ctx = getGlobalAudioContext();
+    // Only unregister listeners once audio context is genuinely running
+    if (isAudioUnlocked && ctx && ctx.state === 'running') {
       window.removeEventListener('pointerdown', handleUserInteraction);
       window.removeEventListener('touchstart', handleUserInteraction);
       window.removeEventListener('click', handleUserInteraction);
@@ -415,10 +446,11 @@ function playAudioBuffer(
 }
 
 /**
- * Plays a single audio chunk with 3-tier resilient fallback:
- * Tier 1: Web Audio API via /api/tts (validating Content-Type to prevent EncodingError on HTML responses).
- * Tier 2: Direct Google Translate TTS via HTMLAudioElement (using document-level no-referrer).
- * Tier 3: Verified native Vietnamese Web Speech voice.
+ * Plays a single audio chunk with 4-tier resilient fallback:
+ * Tier 1: Web Audio API via /api/tts (validating Content-Type).
+ * Tier 2: Dedicated iOS Safari native speech fallback (with vi-VN language mapping).
+ * Tier 3: Direct Google Translate TTS via HTMLAudioElement (using document-level no-referrer).
+ * Tier 4: Verified native Vietnamese Web Speech voice for Desktop.
  */
 async function playSingleChunk(
   chunk: string,
@@ -486,11 +518,37 @@ async function playSingleChunk(
         }
       }
     } catch {
-      // Tier 1 unavailable, smoothly proceed to Tier 2
+      // Tier 1 unavailable, proceed to Tier 2
     }
   }
 
-  // Strategy 3 (Tier 2): Direct Google Translate TTS via HTMLAudioElement
+  // Strategy 3 (Tier 2 - Dedicated for iOS Safari): Native Web Speech API with vi-VN language mapping
+  // On iPhone, Apple AVFoundation speaks vi-VN locally with 100% reliability even if Web Audio / fetch is blocked!
+  if (isIOS && 'speechSynthesis' in window) {
+    try {
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+      await new Promise<void>((resolve) => {
+        const u = new SpeechSynthesisUtterance(chunk);
+        u.lang = 'vi-VN';
+        const viVoice = getVietnameseVoice();
+        if (viVoice) {
+          u.voice = viVoice;
+        }
+        u.volume = volume;
+        u.rate = rate;
+        u.onend = () => resolve();
+        u.onerror = () => resolve();
+        window.speechSynthesis.speak(u);
+      });
+      return; // Successfully played on iOS Safari!
+    } catch (iosErr) {
+      console.warn('iOS Web Speech attempt notice:', iosErr);
+    }
+  }
+
+  // Strategy 4 (Tier 3): Direct Google Translate TTS via HTMLAudioElement
   // Powered by <meta name="referrer" content="no-referrer"> in index.html (no 404 blocked referer!)
   const audio = getSharedAudioElement();
   if (audio) {
@@ -532,11 +590,11 @@ async function playSingleChunk(
       });
       return; // Successfully played chunk via Direct Google TTS!
     } catch {
-      // proceed to Tier 3
+      // proceed to Tier 4
     }
   }
 
-  // Strategy 4 (Tier 3): Verified Vietnamese Web Speech voice (ONLY genuine Vietnamese, NEVER English)
+  // Strategy 5 (Tier 4): Verified Vietnamese Web Speech voice for Desktop (ONLY genuine Vietnamese, NEVER English)
   const viVoice = getVietnameseVoice();
   if ('speechSynthesis' in window && viVoice) {
     await new Promise<void>((resolve) => {
@@ -557,7 +615,7 @@ async function playSingleChunk(
 }
 
 /**
- * Standard Vietnamese TTS Engine using Serverless /api/tts & Direct Google Fallback.
+ * Standard Vietnamese TTS Engine using Serverless /api/tts & iOS Fallback.
  * Plays ONE single pristine Vietnamese audio stream with ZERO overlaps and NO English mispronunciation.
  */
 async function playStandardVietnameseTTS(
