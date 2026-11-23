@@ -152,6 +152,37 @@ async function startServer() {
   app.get("/api/entertainment/search", handleEntertainmentSearch);
   app.post("/api/entertainment/search", handleEntertainmentSearch);
 
+  // Backend Endpoint for Vietnamese TTS Audio (Google Translate TTS proxy)
+  app.get("/api/tts", async (req, res) => {
+    try {
+      const text = (req.query.text as string || "").trim();
+      if (!text) {
+        res.status(400).send("Text is required");
+        return;
+      }
+      const encoded = encodeURIComponent(text.slice(0, 250));
+      const googleTtsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encoded}`;
+      const response = await fetch(googleTtsUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'audio/mpeg, audio/*, */*',
+        },
+      });
+      if (!response.ok) {
+        res.status(response.status).send(`TTS upstream error: ${response.statusText}`);
+        return;
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+      res.send(Buffer.from(arrayBuffer));
+    } catch (err: any) {
+      console.error("[TTS] Local server error:", err);
+      res.status(500).send("Error fetching TTS audio");
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

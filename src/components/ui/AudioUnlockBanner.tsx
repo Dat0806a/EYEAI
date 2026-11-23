@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Volume2 } from 'lucide-react';
-import { unlockAudio, speakVietnamese } from '../../utils/speech';
+import { Volume2, VolumeX } from 'lucide-react';
+import { unlockAudio, speakVietnamese, updateSpeechSettings, getSpeechSettings } from '../../utils/speech';
 
 export function AudioUnlockBanner() {
-  const [unlocked, setUnlocked] = useState(false);
+  const [unlocked, setUnlocked] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return sessionStorage.getItem('eyetalk_audio_unlocked') === 'true';
+  });
 
   useEffect(() => {
     const handleTap = () => {
@@ -12,18 +15,30 @@ export function AudioUnlockBanner() {
 
     window.addEventListener('pointerdown', handleTap, { passive: true });
     window.addEventListener('touchstart', handleTap, { passive: true });
+    window.addEventListener('click', handleTap, { passive: true });
 
     return () => {
       window.removeEventListener('pointerdown', handleTap);
       window.removeEventListener('touchstart', handleTap);
+      window.removeEventListener('click', handleTap);
     };
   }, []);
 
   const handleEnableClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    // 1. Force enable speaker in settings
+    updateSpeechSettings({ speakerEnabled: true });
+    // 2. Perform deep unlock of AudioContext, WebKit speech queue, and HTMLAudioElement
     unlockAudio();
     setUnlocked(true);
-    speakVietnamese('Âm thanh trợ lý EyeTalk đã sẵn sàng');
+    try {
+      sessionStorage.setItem('eyetalk_audio_unlocked', 'true');
+    } catch {}
+
+    // 3. Play friendly greeting sound to confirm audio is working
+    setTimeout(() => {
+      speakVietnamese('Âm thanh trợ lý EyeTalk đã sẵn sàng');
+    }, 150);
   };
 
   if (unlocked) return null;
@@ -33,17 +48,16 @@ export function AudioUnlockBanner() {
       <button
         type="button"
         onClick={handleEnableClick}
-        className="w-full bg-[#14213D] text-[#6AC9F0] border-2 border-[#6AC9F0] shadow-[0_10px_25px_rgba(20,33,61,0.4)] rounded-full px-4 py-2.5 flex items-center justify-between gap-3 text-xs sm:text-sm font-black cursor-pointer active:scale-95 transition-transform"
+        className="w-full bg-[#14213D] text-[#6AC9F0] border-2 border-[#6AC9F0] shadow-[0_10px_25px_rgba(20,33,61,0.5)] rounded-full px-4 py-2.5 flex items-center justify-between gap-3 text-xs sm:text-sm font-black cursor-pointer active:scale-95 transition-transform"
       >
         <div className="flex items-center gap-2 min-w-0">
           <Volume2 className="w-5 h-5 text-[#6AC9F0] animate-pulse flex-shrink-0" />
-          <span className="truncate">Bấm vào đây để bật Giọng Nói trên iPhone</span>
+          <span className="truncate">Chạm vào đây để bật Giọng Nói (Chrome / Safari / iPhone)</span>
         </div>
         <span className="bg-[#6AC9F0] text-[#14213D] px-2.5 py-1 rounded-full text-[11px] font-black uppercase flex-shrink-0 shadow-xs">
-          KÍCH HOẠT LOA
+          BẬT LOA
         </span>
       </button>
     </div>
   );
 }
-
