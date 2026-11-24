@@ -6,6 +6,7 @@ import { speakVietnamese, recoverAudioSession } from '../utils/speech';
 import { GridItem, EyeCalibrationData, EyeAction, EyeTrackingState, ChatMessage } from '../types';
 import { Camera, RefreshCw, Volume2, User, Sparkles, Keyboard, KeyboardOff, Eye, Send, RotateCcw, AlertTriangle, Monitor, Play, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI } from '@google/genai';
 
 interface EyeTalkDashboardProps {
   onBackToHome: () => void;
@@ -301,6 +302,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
 
   const sendToGemini = async (currentMessages: ChatMessage[]) => {
     setIsAiLoading(true);
+    let reply: string | null = null;
     try {
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
@@ -310,25 +312,66 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
         body: JSON.stringify({ messages: currentMessages })
       });
       
-      if (!response.ok) {
-        throw new Error("Lỗi mạng hoặc server");
-      }
-      
-      const data = await response.json();
-      const reply = data.text;
-      
-      if (reply) {
-        const assistantMsg: ChatMessage = {
-          id: Date.now().toString(),
-          text: reply,
-          sender: "assistant",
-          timestamp: new Date()
-        };
-        setChatMessages(prev => [...prev, assistantMsg]);
-        speakVietnamese(reply);
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && contentType.includes("application/json")) {
+        const data = await response.json();
+        reply = data.text || data.reply || data.message;
       }
     } catch (err) {
-      console.error("Lỗi Gemini:", err);
+      console.warn("Server /api/gemini/chat unreachable, falling back:", err);
+    }
+
+    if (!reply) {
+      try {
+        const apiKey = (
+          import.meta.env.VITE_GEMINI_API_KEY ||
+          import.meta.env.GEMINI_API_KEY ||
+          ""
+        ).trim();
+        if (apiKey) {
+          const ai = new GoogleGenAI({
+            apiKey,
+            httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+          });
+          const recent = currentMessages.slice(-10);
+          const contents = recent.map(m => ({
+            role: m.sender === "user" ? "user" : "model",
+            parts: [{ text: m.text }],
+          }));
+          const models = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash"];
+          for (const m of models) {
+            try {
+              const res = await ai.models.generateContent({
+                model: m,
+                contents,
+                config: {
+                  systemInstruction: "Bạn là Trợ lý AI giao tiếp thân thiện của hệ thống LUCKY DREAM – EYEAI. Trả lời bằng Tiếng Việt ngắn gọn 2-4 câu.",
+                },
+              });
+              if (res && res.text) {
+                reply = res.text;
+                break;
+              }
+            } catch {
+              // Try next model
+            }
+          }
+        }
+      } catch (clientErr) {
+        console.warn("Client Gemini fallback error:", clientErr);
+      }
+    }
+
+    if (reply) {
+      const assistantMsg: ChatMessage = {
+        id: Date.now().toString(),
+        text: reply,
+        sender: "assistant",
+        timestamp: new Date()
+      };
+      setChatMessages(prev => [...prev, assistantMsg]);
+      speakVietnamese(reply);
+    } else {
       const systemErrorMsg: ChatMessage = {
         id: Date.now().toString(),
         text: "Không thể kết nối hoặc phản hồi từ Gemini API.",
@@ -336,9 +379,8 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
         timestamp: new Date()
       };
       setChatMessages(prev => [...prev, systemErrorMsg]);
-    } finally {
-      setIsAiLoading(false);
     }
+    setIsAiLoading(false);
   };
 
   // Turn ON / OFF camera and Eye-tracking

@@ -89,7 +89,7 @@ async function startServer() {
       contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
       // Model list with official fallback
-      const modelsToTry = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"];
+      const modelsToTry = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash"];
       let lastError: any = null;
       let replyText = "";
 

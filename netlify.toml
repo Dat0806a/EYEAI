@@ -5,14 +5,34 @@
 [functions]
   directory = "netlify/functions"
 
-# 1. API TTS Audio Proxy for Chrome & Safari (Netlify Serverless Function)
+# 1. API Patient Endpoints (Netlify Serverless Function)
+[[redirects]]
+  from = "/api/patient/*"
+  to = "/.netlify/functions/patient"
+  status = 200
+  force = true
+
+# 2. API AI Chat Endpoints
+[[redirects]]
+  from = "/api/ai/chat"
+  to = "/.netlify/functions/ai-chat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/gemini/chat"
+  to = "/.netlify/functions/ai-chat"
+  status = 200
+  force = true
+
+# 3. API TTS Audio Proxy for Chrome & Safari (Netlify Serverless Function)
 [[redirects]]
   from = "/api/tts"
   to = "/.netlify/functions/tts"
   status = 200
   force = true
 
-# 2. SPA Fallback routing
+# 4. SPA Fallback routing
 [[redirects]]
   from = "/*"
   to = "/index.html"

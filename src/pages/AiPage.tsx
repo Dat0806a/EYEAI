@@ -66,7 +66,7 @@ async function fetchDirectGemini(textToSend: string, history: any[], signal: Abo
       }
     });
 
-    const modelsToTry = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-flash-lite-latest", "gemini-2.0-flash"];
+    const modelsToTry = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash", "gemini-flash-latest"];
     for (const modelName of modelsToTry) {
       try {
         const response = await ai.models.generateContent({
