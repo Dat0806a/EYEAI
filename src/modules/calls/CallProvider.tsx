@@ -38,22 +38,31 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [connectStage, setConnectStage] = useState<string>('');
+  const [failReason, setFailReason] = useState<string>('');
 
   const webrtcRef = useRef<WebRTCService | null>(null);
   const callRoomChannelRef = useRef<RealtimeChannel | null>(null);
   const callTracksToStopRef = useRef<MediaStreamTrack[]>([]);
   const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
+  const localOfferSdpRef = useRef<RTCSessionDescriptionInit | null>(null);
+  const localIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const callTimerRef = useRef<number | null>(null);
   const connectTimeoutRef = useRef<number | null>(null);
   const disconnectGraceTimerRef = useRef<number | null>(null);
+  const signalingRetryTimerRef = useRef<number | null>(null);
+  const iceRestartTimerRef = useRef<number | null>(null);
   const localMediaPromiseRef = useRef<Promise<MediaStream> | null>(null);
 
   const isStartingCallRef = useRef(false);
   const isAcceptingCallRef = useRef(false);
   const offerSentRef = useRef(false);
   const answerSentRef = useRef(false);
+  const answerReceivedRef = useRef(false);
+  const iceRestartedRef = useRef(false);
   const calleeAcceptedRef = useRef(false);
   const calleeMediaReadyRef = useRef(false);
+  const callRoomAvailableRef = useRef(true);
 
   const callStateRef = useRef<CallStatus>('idle');
   const callSessionRef = useRef<CallSession | null>(null);
@@ -82,13 +91,59 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const resetCallNegotiationRefs = () => {
     pendingOfferRef.current = null;
+    localOfferSdpRef.current = null;
+    localIceCandidatesRef.current = [];
     localMediaPromiseRef.current = null;
     isStartingCallRef.current = false;
     isAcceptingCallRef.current = false;
     offerSentRef.current = false;
     answerSentRef.current = false;
+    answerReceivedRef.current = false;
+    iceRestartedRef.current = false;
     calleeAcceptedRef.current = false;
     calleeMediaReadyRef.current = false;
+    callRoomAvailableRef.current = true;
+    setConnectStage('');
+    setFailReason('');
+  };
+
+  /**
+   * Send signaling payload over Call Room first, falling back to user_signaling_{receiverId}
+   * if the Call Room channel is unavailable or fails ACK.
+   */
+  const sendRoomSignalWithFallback = async (
+    payload: SignalingPayload,
+    forceDualSend = false
+  ): Promise<boolean> => {
+    let sentViaRoom = false;
+    if (callRoomAvailableRef.current && callRoomChannelRef.current) {
+      sentViaRoom = await signalingService.sendToCallRoom(callRoomChannelRef.current, payload);
+    }
+
+    if (!sentViaRoom || forceDualSend) {
+      const sentViaUser = await signalingService.sendUserSignal(payload.receiverId, payload);
+      return sentViaRoom || sentViaUser;
+    }
+
+    return sentViaRoom;
+  };
+
+  const failCallWithReason = (reason: string) => {
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
+    if (signalingRetryTimerRef.current) {
+      clearTimeout(signalingRetryTimerRef.current);
+      signalingRetryTimerRef.current = null;
+    }
+    if (iceRestartTimerRef.current) {
+      clearTimeout(iceRestartTimerRef.current);
+      iceRestartTimerRef.current = null;
+    }
+    setFailReason(reason);
+    setCallState('failed');
+    callStateRef.current = 'failed';
   };
 
   /**
@@ -101,13 +156,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
         onIceCandidate: candidate => {
           const activeSession = callSessionRef.current;
           const uid = currentUserIdRef.current;
-          if (activeSession && uid && callRoomChannelRef.current) {
+          if (activeSession && uid) {
+            localIceCandidatesRef.current.push(candidate);
             const targetId =
               activeSession.caller_id === uid
                 ? activeSession.callee_id
                 : activeSession.caller_id;
             console.log('[CALL][WEBRTC] Broadcasting ICE candidate to room');
-            void signalingService.sendToCallRoom(callRoomChannelRef.current, {
+            void sendRoomSignalWithFallback({
               type: 'webrtc:ice-candidate',
               callId: activeSession.id,
               senderId: uid,
@@ -129,6 +185,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
               clearTimeout(disconnectGraceTimerRef.current);
               disconnectGraceTimerRef.current = null;
             }
+            if (signalingRetryTimerRef.current) {
+              clearTimeout(signalingRetryTimerRef.current);
+              signalingRetryTimerRef.current = null;
+            }
+            if (iceRestartTimerRef.current) {
+              clearTimeout(iceRestartTimerRef.current);
+              iceRestartTimerRef.current = null;
+            }
+            setConnectStage('');
+            setFailReason('');
             setCallState('accepted');
             callStateRef.current = 'accepted';
             speakVietnamese('Âm thanh cuộc gọi đã kết nối');
@@ -137,13 +203,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
             }
           } else if (state === 'failed') {
             console.warn('[CALL][WEBRTC] Connection state FAILED');
-            if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
             if (disconnectGraceTimerRef.current) {
               clearTimeout(disconnectGraceTimerRef.current);
               disconnectGraceTimerRef.current = null;
             }
-            setCallState('failed');
-            callStateRef.current = 'failed';
+            const snap = webrtcRef.current?.getConnectionSnapshot();
+            failCallWithReason(
+              snap?.hasTurnConfigured
+                ? 'Không thể thiết lập đường truyền WebRTC P2P.'
+                : 'Không thể kết nối P2P qua NAT/Firewall (cần cấu hình TURN server khi gọi khác mạng).'
+            );
           } else if (state === 'disconnected') {
             if (!disconnectGraceTimerRef.current) {
               console.warn('[CALL][WEBRTC] Connection transiently disconnected, waiting 5s for ICE recovery...');
@@ -172,11 +241,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     answerSentRef.current = true;
     try {
+      setConnectStage('Đang gửi phản hồi WebRTC...');
       const webrtc = getWebRTCService();
       console.log('[CALL][WEBRTC] Creating answer SDP for offer');
       const answer = await webrtc.createAnswer(offerSdp);
       console.log('[CALL][SIGNAL] Broadcasting webrtc:answer to Call Room');
-      await signalingService.sendToCallRoom(callRoomChannelRef.current, {
+      setConnectStage('Đang thiết lập kết nối P2P (ICE)...');
+      await sendRoomSignalWithFallback({
         type: 'webrtc:answer',
         callId: activeSession.id,
         senderId: uid,
@@ -187,13 +258,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       answerSentRef.current = false;
       console.error('[CALL][WEBRTC] Failed to create/send answer:', err);
-      setCallState('failed');
-      callStateRef.current = 'failed';
+      failCallWithReason('Không thể tạo phản hồi WebRTC Answer.');
     }
   };
 
   /**
-   * Handle WebRTC signaling events inside the dedicated Call Room
+   * Handle WebRTC signaling events inside the dedicated Call Room or fallback user channel
    */
   const handleRoomSignaling = async (payload: SignalingPayload) => {
     const activeSession = callSessionRef.current;
@@ -219,6 +289,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (uid && activeSession.caller_id === uid && !offerSentRef.current) {
           offerSentRef.current = true;
           try {
+            setConnectStage('Đang chuẩn bị micro...');
             const stream = localMediaPromiseRef.current
               ? await localMediaPromiseRef.current
               : await acquireMediaStream('voice');
@@ -227,20 +298,53 @@ export function CallProvider({ children }: { children: ReactNode }) {
             const webrtc = getWebRTCService();
             webrtc.addLocalStream(stream);
             const offer = await webrtc.createOffer();
+            localOfferSdpRef.current = offer;
+            setConnectStage('Đang gửi lời mời WebRTC tới người nhận...');
             console.log('[CALL][SIGNAL] Broadcasting webrtc:offer over Call Room channel');
-            await signalingService.sendToCallRoom(callRoomChannelRef.current, {
+
+            const offerPayload: SignalingPayload = {
               type: 'webrtc:offer',
               callId: activeSession.id,
               senderId: uid,
               receiverId: activeSession.callee_id,
               senderName: profileRef.current?.display_name || 'Người dùng',
               sdp: offer,
-            });
+            };
+            await sendRoomSignalWithFallback(offerPayload);
+
+            // Retry offer via dual-path if answer doesn't arrive within 3s
+            if (signalingRetryTimerRef.current) clearTimeout(signalingRetryTimerRef.current);
+            signalingRetryTimerRef.current = window.setTimeout(async () => {
+              if (
+                callSessionRef.current?.id === activeSession.id &&
+                callStateRef.current === 'connecting' &&
+                !answerReceivedRef.current &&
+                localOfferSdpRef.current
+              ) {
+                console.warn('[CALL][SIGNAL] No webrtc:answer after 3s, retrying offer + candidates via fallback');
+                await sendRoomSignalWithFallback(
+                  { ...offerPayload, sdp: localOfferSdpRef.current },
+                  true
+                );
+                for (const cand of localIceCandidatesRef.current) {
+                  await sendRoomSignalWithFallback(
+                    {
+                      type: 'webrtc:ice-candidate',
+                      callId: activeSession.id,
+                      senderId: uid,
+                      receiverId: activeSession.callee_id,
+                      senderName: profileRef.current?.display_name || 'Người dùng',
+                      candidate: cand,
+                    },
+                    true
+                  );
+                }
+              }
+            }, 3000);
           } catch (err) {
             offerSentRef.current = false;
             console.error('[CALL][WEBRTC] Failed to create/send offer after accept:', err);
-            setCallState('failed');
-            callStateRef.current = 'failed';
+            failCallWithReason('Không thể tạo tín hiệu kết nối WebRTC Offer.');
           }
         }
         break;
@@ -248,6 +352,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       case 'webrtc:offer': {
         console.log('[CALL][WEBRTC] Received offer SDP from:', payload.senderName);
+        if (signalingRetryTimerRef.current) {
+          clearTimeout(signalingRetryTimerRef.current);
+          signalingRetryTimerRef.current = null;
+        }
+        if (payload.sdp && pendingOfferRef.current && answerSentRef.current) {
+          // Handle ICE restart offer if caller re-sent a new offer after initial answer
+          if (payload.sdp.sdp !== pendingOfferRef.current.sdp) {
+            console.log('[CALL][WEBRTC] Received updated offer (ICE restart), re-creating answer');
+            pendingOfferRef.current = payload.sdp;
+            answerSentRef.current = false;
+            await createAndSendAnswer(payload.sdp);
+          }
+          break;
+        }
         pendingOfferRef.current = payload.sdp || null;
         if (
           pendingOfferRef.current &&
@@ -262,9 +380,53 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       case 'webrtc:answer': {
         console.log('[CALL][WEBRTC] Received answer SDP from receiver');
+        answerReceivedRef.current = true;
+        if (signalingRetryTimerRef.current) {
+          clearTimeout(signalingRetryTimerRef.current);
+          signalingRetryTimerRef.current = null;
+        }
         if (payload.sdp) {
+          setConnectStage('Đang thiết lập kết nối P2P (ICE)...');
           const webrtc = getWebRTCService();
           await webrtc.handleAnswer(payload.sdp);
+
+          // Schedule one ICE restart if P2P hasn't connected after 8s
+          if (
+            uid &&
+            activeSession.caller_id === uid &&
+            !iceRestartedRef.current &&
+            !iceRestartTimerRef.current
+          ) {
+            iceRestartTimerRef.current = window.setTimeout(async () => {
+              iceRestartTimerRef.current = null;
+              if (
+                callSessionRef.current?.id === activeSession.id &&
+                callStateRef.current === 'connecting' &&
+                !iceRestartedRef.current
+              ) {
+                iceRestartedRef.current = true;
+                console.warn('[CALL][ICE] Still connecting after 8s, attempting ICE restart...');
+                setConnectStage('Đang thử kết nối lại đường truyền...');
+                try {
+                  const restartOffer = await webrtc.createOffer({ iceRestart: true });
+                  localOfferSdpRef.current = restartOffer;
+                  await sendRoomSignalWithFallback(
+                    {
+                      type: 'webrtc:offer',
+                      callId: activeSession.id,
+                      senderId: uid,
+                      receiverId: activeSession.callee_id,
+                      senderName: profileRef.current?.display_name || 'Người dùng',
+                      sdp: restartOffer,
+                    },
+                    true
+                  );
+                } catch (err) {
+                  console.warn('[CALL][ICE] ICE restart failed:', err);
+                }
+              }
+            }, 8000);
+          }
         }
         break;
       }
@@ -334,10 +496,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
         callRoomChannelRef.current = signalingService.joinCallRoom(payload.callId, roomPayload =>
           handleRoomSignalingRef.current(roomPayload)
         );
-      } else if (payload.type === 'call:hangup' || payload.type === 'call:decline') {
+      } else if (
+        payload.type === 'call:accept' ||
+        payload.type === 'webrtc:offer' ||
+        payload.type === 'webrtc:answer' ||
+        payload.type === 'webrtc:ice-candidate' ||
+        payload.type === 'call:hangup' ||
+        payload.type === 'call:decline'
+      ) {
         if (callSessionRef.current?.id === payload.callId) {
-          speakVietnamese('Cuộc gọi đã kết thúc');
-          handleCleanup();
+          await handleRoomSignalingRef.current(payload);
         }
       }
     });
@@ -360,17 +528,24 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
     connectTimeoutRef.current = window.setTimeout(() => {
       if (callStateRef.current === 'connecting') {
-        console.warn('[CALL][TIMEOUT] Voice call connection timed out after 20s');
+        const snap = webrtcRef.current?.getConnectionSnapshot();
+        console.warn('[CALL][TIMEOUT] Voice call connection timed out after 20s:', snap);
         speakVietnamese('Không thể kết nối cuộc gọi thoại');
-        setCallState('failed');
+        if (!pendingOfferRef.current && callSessionRef.current?.callee_id === currentUserIdRef.current) {
+          failCallWithReason('Không nhận được tín hiệu WebRTC từ người gọi.');
+        } else if (!answerReceivedRef.current && callSessionRef.current?.caller_id === currentUserIdRef.current) {
+          failCallWithReason('Không nhận được phản hồi WebRTC từ người nhận.');
+        } else if (snap && !snap.hasTurnConfigured) {
+          failCallWithReason('Hết thời gian kết nối P2P (cần cấu hình TURN server nếu hai máy khác mạng/NAT).');
+        } else {
+          failCallWithReason('Hết thời gian thiết lập kết nối âm thanh.');
+        }
       }
     }, 20000);
   };
 
   /**
-   * Acquire local media stream SAFELY preserving Eye Tracking camera
-   * Chi xin quyen micro (`audio: true, video: false`) cho cuoc goi thoai WebRTC,
-   * tuyet doi khong dung cham hay ngat luong camera dang chay o `EyeTrackingProvider`.
+   * Acquire local media stream SAFELY preserving Eye Tracking camera (with 6s safety timeout)
    */
   const acquireMediaStream = async (type: CallType): Promise<MediaStream> => {
     const tracks: MediaStreamTrack[] = [];
@@ -383,7 +558,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
     } else {
       try {
         console.log('[CALL][MEDIA] Requesting microphone access...');
-        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const audioStream = await Promise.race([
+          navigator.mediaDevices.getUserMedia({ audio: true, video: false }),
+          new Promise<never>((_, reject) =>
+            window.setTimeout(() => reject(new Error('MICROPHONE_TIMEOUT')), 6000)
+          ),
+        ]);
         const audioTrack = audioStream.getAudioTracks()[0];
         if (audioTrack) {
           tracks.push(audioTrack);
@@ -391,7 +571,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           console.log('[CALL][MEDIA] Microphone track acquired:', audioTrack.label);
         }
       } catch (e) {
-        console.warn('[CALL][MEDIA] Microphone access failed or denied:', e);
+        console.warn('[CALL][MEDIA] Microphone access failed, denied, or timed out:', e);
       }
     }
 
@@ -483,11 +663,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (!roomReady) {
-      console.warn('[CALL][SIGNAL] Caller failed to subscribe to call room');
-      setCallState('failed');
-      callStateRef.current = 'failed';
-      isStartingCallRef.current = false;
-      return;
+      console.warn('[CALL][SIGNAL] Call room subscription unavailable, falling back to user_signaling channel');
+      callRoomAvailableRef.current = false;
     }
 
     // 4. Send ring notification to Callee's global incoming channel
@@ -520,7 +697,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   /**
    * Chap nhan cuoc goi thoai WebRTC den.
    * - Xin quyen su dung micro, doi room san sang va gui `call:accept` cho nguoi goi.
-   * - Cho/phan hoi SDP Offer bang SDP Answer qua Supabase Call Room.
+   * - Cho/phan hoi SDP Offer bang SDP Answer qua Supabase Call Room (co fallback user_signaling).
    */
   const acceptCall = async () => {
     const activeSession = callSessionRef.current;
@@ -530,18 +707,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
     isAcceptingCallRef.current = true;
     console.log('[CALL][UI] Accepting incoming voice call from:', activeSession.caller_name);
     if (callTimerRef.current) clearTimeout(callTimerRef.current);
+    setConnectStage('Đang chuẩn bị micro...');
     setCallState('connecting');
     callStateRef.current = 'connecting';
     startConnectTimeout();
 
-    try {
-      await supabase
+    // Update DB status in parallel without blocking WebRTC handshake
+    void Promise.resolve(
+      supabase
         .from('calls')
         .update({ status: 'accepted', answered_at: new Date().toISOString() })
-        .eq('id', activeSession.id);
-    } catch {
-      // Ignore
-    }
+        .eq('id', activeSession.id)
+    ).catch(() => {});
 
     const stream = await acquireMediaStream('voice');
     if (callSessionRef.current?.id !== activeSession.id) {
@@ -553,35 +730,49 @@ export function CallProvider({ children }: { children: ReactNode }) {
     webrtc.addLocalStream(stream);
     calleeMediaReadyRef.current = true;
 
-    // Wait until Callee is subscribed to Call Room BEFORE sending call:accept
+    // Wait until Callee is subscribed to Call Room BEFORE sending call:accept (fallback to user_signaling if room fails)
+    setConnectStage('Đang kết nối kênh tín hiệu...');
     const roomReady = await signalingService.waitForCallRoomReady(callRoomChannelRef.current);
     if (callSessionRef.current?.id !== activeSession.id) {
       isAcceptingCallRef.current = false;
       return;
     }
     if (!roomReady) {
-      console.warn('[CALL][SIGNAL] Callee failed to subscribe to call room');
-      setCallState('failed');
-      callStateRef.current = 'failed';
-      isAcceptingCallRef.current = false;
-      return;
+      console.warn('[CALL][SIGNAL] Callee call_room unavailable, using user_signaling fallback');
+      callRoomAvailableRef.current = false;
     }
 
     calleeAcceptedRef.current = true;
 
-    // 1. Broadcast call:accept over Call Room so Caller generates Offer & ICE candidates
-    console.log('[CALL][SIGNAL] Broadcasting call:accept to Call Room');
-    await signalingService.sendToCallRoom(callRoomChannelRef.current, {
+    const acceptPayload: SignalingPayload = {
       type: 'call:accept',
       callId: activeSession.id,
       senderId: currentUserId,
       receiverId: activeSession.caller_id,
       senderName: profileRef.current?.display_name || 'Người dùng',
-    });
+    };
+
+    // 1. Broadcast call:accept over Call Room (with automatic fallback to user_signaling)
+    setConnectStage('Đang chờ tín hiệu WebRTC từ người gọi...');
+    console.log('[CALL][SIGNAL] Broadcasting call:accept to Call Room');
+    await sendRoomSignalWithFallback(acceptPayload);
 
     // 2. If an offer already arrived early, answer immediately
     if (pendingOfferRef.current && !answerSentRef.current) {
       await createAndSendAnswer(pendingOfferRef.current);
+    } else {
+      // Retry call:accept via both channels after 3s if webrtc:offer still hasn't arrived
+      if (signalingRetryTimerRef.current) clearTimeout(signalingRetryTimerRef.current);
+      signalingRetryTimerRef.current = window.setTimeout(async () => {
+        if (
+          callSessionRef.current?.id === activeSession.id &&
+          callStateRef.current === 'connecting' &&
+          !pendingOfferRef.current
+        ) {
+          console.warn('[CALL][SIGNAL] No webrtc:offer received after 3s, retrying call:accept via fallback');
+          await sendRoomSignalWithFallback(acceptPayload, true);
+        }
+      }, 3000);
     }
 
     isAcceptingCallRef.current = false;
@@ -603,7 +794,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         // Ignore
       }
 
-      await signalingService.sendToCallRoom(callRoomChannelRef.current, {
+      await sendRoomSignalWithFallback({
         type: 'call:decline',
         callId: activeSession.id,
         senderId: currentUserId,
@@ -641,10 +832,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         senderName: profileRef.current?.display_name || 'Người dùng',
       };
 
-      await signalingService.sendToCallRoom(callRoomChannelRef.current, hangupPayload);
-      if (wasRinging && activeSession.caller_id === currentUserId) {
-        await signalingService.sendUserSignal(targetId, hangupPayload);
-      }
+      await sendRoomSignalWithFallback(hangupPayload, wasRinging && activeSession.caller_id === currentUserId);
     }
     handleCleanup();
   };
@@ -689,6 +877,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (disconnectGraceTimerRef.current) {
       clearTimeout(disconnectGraceTimerRef.current);
       disconnectGraceTimerRef.current = null;
+    }
+    if (signalingRetryTimerRef.current) {
+      clearTimeout(signalingRetryTimerRef.current);
+      signalingRetryTimerRef.current = null;
+    }
+    if (iceRestartTimerRef.current) {
+      clearTimeout(iceRestartTimerRef.current);
+      iceRestartTimerRef.current = null;
     }
 
     // Leave Call Room Channel
@@ -748,6 +944,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
         <CallOverlayModal
           callSession={callSession}
           callState={callState}
+          connectStage={connectStage}
+          failReason={failReason}
           localStream={localStream}
           remoteStream={remoteStream}
           isMuted={isMuted}
@@ -774,6 +972,8 @@ export function useCall() {
 function CallOverlayModal({
   callSession,
   callState,
+  connectStage,
+  failReason,
   localStream,
   remoteStream,
   isMuted,
@@ -785,6 +985,8 @@ function CallOverlayModal({
 }: {
   callSession: CallSession | null;
   callState: CallStatus;
+  connectStage: string;
+  failReason: string;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
   isMuted: boolean;
@@ -866,6 +1068,12 @@ function CallOverlayModal({
               {isAccepted && <span className="text-emerald-400">Âm thanh cuộc gọi đã kết nối</span>}
               {isFailed && <span className="text-red-400">Không thể kết nối cuộc gọi</span>}
             </p>
+            {isConnecting && connectStage && (
+              <p className="text-xs text-slate-300 mt-1">{connectStage}</p>
+            )}
+            {isFailed && failReason && (
+              <p className="text-xs text-red-200/90 mt-1 max-w-xs mx-auto">{failReason}</p>
+            )}
           </div>
         </div>
       </div>

@@ -28,6 +28,8 @@ export class WebRTCService {
       { urls: import.meta.env.VITE_WEBRTC_STUN_URL || 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
     ];
 
     if (import.meta.env.VITE_WEBRTC_TURN_URL) {
@@ -82,6 +84,11 @@ export class WebRTCService {
         console.log('[CALL][ICE] ICE connection state changed to:', this.pc.iceConnectionState);
         if (this.pc.iceConnectionState === 'failed' && this.pc.connectionState !== 'failed') {
           this.callbacks.onConnectionStateChange('failed');
+        } else if (
+          (this.pc.iceConnectionState === 'connected' || this.pc.iceConnectionState === 'completed') &&
+          this.pc.connectionState === undefined
+        ) {
+          this.callbacks.onConnectionStateChange('connected');
         }
       }
     };
@@ -90,13 +97,14 @@ export class WebRTCService {
   }
 
   /**
-   * Add local media tracks to peer connection
+   * Add local media tracks to peer connection (or ensure active audio transceiver when mic unavailable)
    */
   public addLocalStream(stream: MediaStream): void {
     const pc = this.initPeerConnection();
     const existingSenders = pc.getSenders();
     console.log('[CALL][MEDIA] Adding local tracks to PeerConnection:', stream.getTracks().map(t => `${t.kind}:${t.readyState}`));
 
+    const audioTracks = stream.getAudioTracks();
     stream.getTracks().forEach(track => {
       // Prevent adding duplicate tracks for same kind
       const senderExists = existingSenders.some(s => s.track && s.track.kind === track.kind);
@@ -108,22 +116,32 @@ export class WebRTCService {
       }
     });
 
+    // Ensure ICE/DTLS still negotiates even if local microphone is unavailable (0 tracks)
+    if (audioTracks.length === 0 && typeof pc.addTransceiver === 'function') {
+      const hasAudioTransceiver = pc.getTransceivers?.().some(t => t.receiver?.track?.kind === 'audio');
+      if (!hasAudioTransceiver) {
+        pc.addTransceiver('audio', { direction: 'sendrecv' });
+        console.log('[CALL][MEDIA] Added fallback sendrecv audio transceiver (no local mic track)');
+      }
+    }
+
     this.dumpWebRTCState();
   }
 
   /**
    * Create WebRTC Offer SDP (Caller)
    */
-  public async createOffer(): Promise<RTCSessionDescriptionInit> {
+  public async createOffer(options?: { iceRestart?: boolean }): Promise<RTCSessionDescriptionInit> {
     const pc = this.initPeerConnection();
     const offer = await pc.createOffer({
       offerToReceiveAudio: true,
       offerToReceiveVideo: false,
+      iceRestart: options?.iceRestart,
     });
     await pc.setLocalDescription(offer);
 
     const hasAudio = offer.sdp ? /m=audio/.test(offer.sdp) : false;
-    console.log('[CALL][WEBRTC] Local offer created & set. offerHasAudio:', hasAudio);
+    console.log('[CALL][WEBRTC] Local offer created & set. offerHasAudio:', hasAudio, 'iceRestart:', !!options?.iceRestart);
     this.dumpWebRTCState();
     return offer;
   }
@@ -253,6 +271,16 @@ export class WebRTCService {
     const result = { audioSent, audioReceived, packetsSent, packetsReceived };
     console.log('[CALL][STATS] Audio RTP Stats:', result);
     return result;
+  }
+
+  public getConnectionSnapshot() {
+    return {
+      signalingState: this.pc?.signalingState ?? 'closed',
+      iceGatheringState: this.pc?.iceGatheringState ?? 'new',
+      iceConnectionState: this.pc?.iceConnectionState ?? 'new',
+      connectionState: this.pc?.connectionState ?? 'new',
+      hasTurnConfigured: Boolean(import.meta.env.VITE_WEBRTC_TURN_URL),
+    };
   }
 
   /**

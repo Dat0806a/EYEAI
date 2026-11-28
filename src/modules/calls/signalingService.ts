@@ -3,10 +3,11 @@ import { SignalingPayload } from '../../types/chat';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 const channelReadyPromises = new WeakMap<RealtimeChannel, Promise<boolean>>();
+const userSignalActiveCounts = new Map<string, number>();
 
 export const signalingService = {
   /**
-   * Subscribe to user's global incoming signaling channel (for call:ring)
+   * Subscribe to user's global incoming signaling channel (for call:ring & fallback signaling)
    */
   subscribeToUserSignaling(
     userId: string,
@@ -19,7 +20,7 @@ export const signalingService = {
       .channel(channelName, {
         config: {
           private: true,
-          broadcast: { self: false },
+          broadcast: { ack: true, self: false },
         },
       })
       .on('broadcast', { event: 'webrtc_signal' }, ({ payload }) => {
@@ -36,13 +37,52 @@ export const signalingService = {
   },
 
   /**
-   * Send a one-shot signal to a user's global incoming channel (e.g. call:ring)
+   * Send a signal to a user's global incoming channel (for call:ring and signaling fallback)
    */
   async sendUserSignal(targetUserId: string, payload: SignalingPayload): Promise<boolean> {
     const channelName = `user_signaling_${targetUserId}`;
+    const nextCount = (userSignalActiveCounts.get(channelName) || 0) + 1;
+    userSignalActiveCounts.set(channelName, nextCount);
+
     const channel = supabase.channel(channelName, {
-      config: { private: true, broadcast: { self: false } },
+      config: { private: true, broadcast: { ack: true, self: false } },
     });
+
+    const releaseChannel = () => {
+      const remaining = Math.max(0, (userSignalActiveCounts.get(channelName) || 1) - 1);
+      if (remaining === 0) {
+        userSignalActiveCounts.delete(channelName);
+        supabase.removeChannel(channel);
+      } else {
+        userSignalActiveCounts.set(channelName, remaining);
+      }
+    };
+
+    const sendPayload = async (): Promise<boolean> => {
+      try {
+        const sendResult = await channel.send({
+          type: 'broadcast',
+          event: 'webrtc_signal',
+          payload,
+        });
+        setTimeout(releaseChannel, 1000);
+        if (sendResult !== 'ok') {
+          console.warn(`[CALL][SIGNAL] User signal ${payload.type} to ${channelName} returned:`, sendResult);
+          return false;
+        }
+        return true;
+      } catch (err) {
+        console.warn(`[CALL][SIGNAL] Error sending signal to ${channelName}:`, err);
+        releaseChannel();
+        return false;
+      }
+    };
+
+    // If the channel is already joined in supabase-js, subscribe() won't fire again
+    if ((channel as any).state === 'joined') {
+      console.log(`[CALL][SIGNAL] Reusing joined channel ${channelName} for ${payload.type}`);
+      return await sendPayload();
+    }
 
     return new Promise(resolve => {
       let settled = false;
@@ -54,32 +94,19 @@ export const signalingService = {
       };
 
       const timeoutId = setTimeout(() => {
-        console.warn(`[CALL][SIGNAL] Timed out sending signal to ${channelName}`);
-        supabase.removeChannel(channel);
+        console.warn(`[CALL][SIGNAL] Timed out sending signal ${payload.type} to ${channelName}`);
+        releaseChannel();
         finish(false);
       }, 8000);
 
       channel.subscribe(async status => {
         if (status === 'SUBSCRIBED') {
           console.log(`[CALL][SIGNAL] Sending ${payload.type} to target user channel ${channelName}`);
-          try {
-            const sendResult = await channel.send({
-              type: 'broadcast',
-              event: 'webrtc_signal',
-              payload,
-            });
-            setTimeout(() => {
-              supabase.removeChannel(channel);
-            }, 1000);
-            finish(sendResult === 'ok');
-          } catch (err) {
-            console.warn(`[CALL][SIGNAL] Error sending signal to ${channelName}:`, err);
-            supabase.removeChannel(channel);
-            finish(false);
-          }
+          const ok = await sendPayload();
+          finish(ok);
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           console.warn(`[CALL][SIGNAL] Failed to subscribe to ${channelName}:`, status);
-          supabase.removeChannel(channel);
+          releaseChannel();
           finish(false);
         }
       });
@@ -116,7 +143,7 @@ export const signalingService = {
       .channel(channelName, {
         config: {
           private: true,
-          broadcast: { self: false },
+          broadcast: { ack: true, self: false },
         },
       })
       .on('broadcast', { event: 'webrtc_signal' }, ({ payload }) => {

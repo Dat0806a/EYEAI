@@ -127,6 +127,7 @@ class MockRTCPeerConnection {
   oniceconnectionstatechange: (() => void) | null = null;
   private senders: Array<{ track: MediaStreamTrack | null }> = [];
   private receivers: Array<{ track: MediaStreamTrack | null }> = [];
+  private transceivers: Array<{ receiver: { track: { kind: string } } }> = [];
   addedIceCandidates: RTCIceCandidateInit[] = [];
 
   constructor() {
@@ -136,6 +137,16 @@ class MockRTCPeerConnection {
   addTrack(track: MediaStreamTrack) {
     this.senders.push({ track });
     return { track } as RTCRtpSender;
+  }
+
+  addTransceiver(kind: string) {
+    const t = { receiver: { track: { kind } } };
+    this.transceivers.push(t);
+    return t as unknown as RTCRtpTransceiver;
+  }
+
+  getTransceivers() {
+    return this.transceivers as unknown as RTCRtpTransceiver[];
   }
 
   getSenders() {
@@ -440,5 +451,124 @@ describe('WebRTC Call Flow & Signaling Reliability', () => {
 
     const callInserts = fromSpy.mock.calls.filter(([table]) => table === 'calls');
     expect(callInserts.length).toBe(1);
+  });
+
+  it('connects via user_signaling fallback even when call_room channel fails with CHANNEL_ERROR', async () => {
+    const hub = new MockRealtimeHub();
+    const CALL_ID = '22222222-2222-4222-8222-222222222222';
+    const CALLER_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const CALLEE_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+
+    vi.spyOn(supabase, 'from').mockImplementation(() => {
+      const chain: any = {
+        insert: () => chain,
+        update: () => chain,
+        eq: async () => ({ data: null, error: null }),
+        select: () => chain,
+        single: async () => ({ data: { id: CALL_ID }, error: null }),
+      };
+      return chain;
+    });
+
+    vi.spyOn(supabase, 'removeChannel').mockImplementation((ch: any) => {
+      void ch?.unsubscribe?.();
+      return Promise.resolve('ok' as any);
+    });
+
+    let channelCounter = 0;
+    vi.spyOn(supabase, 'channel').mockImplementation((topic: string) => {
+      channelCounter += 1;
+      // Force call_room_* to fail with CHANNEL_ERROR so user_signaling fallback is exercised
+      if (topic.startsWith('call_room_')) {
+        const failedCh: any = {
+          topic,
+          on: vi.fn().mockReturnThis(),
+          subscribe: vi.fn((statusCb?: (status: string) => void) => {
+            setTimeout(() => statusCb?.('CHANNEL_ERROR'), 10);
+            return failedCh;
+          }),
+          send: vi.fn().mockResolvedValue('error'),
+          unsubscribe: vi.fn().mockResolvedValue('ok'),
+        };
+        return failedCh;
+      }
+      return hub.createChannel(topic, `peer-${channelCounter}`, 10);
+    });
+
+    const calleeAuth: AuthValue = {
+      user: { id: CALLEE_ID },
+      profile: { id: CALLEE_ID, display_name: 'Người nhận', avatar_url: null },
+      mfaSatisfied: true,
+    };
+
+    const callerAuth: AuthValue = {
+      user: { id: CALLER_ID },
+      profile: { id: CALLER_ID, display_name: 'Khoa', avatar_url: null },
+      mfaSatisfied: true,
+    };
+
+    let calleeApi: ReturnType<typeof useCall> | null = null;
+    function CalleeProbe() {
+      calleeApi = useCall();
+      return <div data-testid="callee-fallback-state">{calleeApi.callState}</div>;
+    }
+
+    const calleeView = render(
+      <TestAuthContext.Provider value={calleeAuth}>
+        <CallProvider>
+          <CalleeProbe />
+        </CallProvider>
+      </TestAuthContext.Provider>
+    );
+
+    let callerApi: ReturnType<typeof useCall> | null = null;
+    function CallerProbe() {
+      callerApi = useCall();
+      return <div data-testid="caller-fallback-state">{callerApi.callState}</div>;
+    }
+
+    const callerView = render(
+      <TestAuthContext.Provider value={callerAuth}>
+        <CallProvider>
+          <CallerProbe />
+        </CallProvider>
+      </TestAuthContext.Provider>
+    );
+
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 30));
+    });
+
+    await act(async () => {
+      await callerApi!.startCall(CALLEE_ID, 'Người nhận', 'voice');
+    });
+
+    await waitFor(() => {
+      expect(calleeView.getByTestId('callee-fallback-state').textContent).toBe('ringing');
+    });
+
+    await act(async () => {
+      await calleeApi!.acceptCall();
+    });
+
+    await waitFor(() => {
+      expect(MockRTCPeerConnection.instances.length).toBe(2);
+      const [calleePc, callerPc] = MockRTCPeerConnection.instances;
+      expect(callerPc.localDescription?.type).toBe('offer');
+      expect(callerPc.remoteDescription?.type).toBe('answer');
+      expect(calleePc.remoteDescription?.type).toBe('offer');
+      expect(calleePc.localDescription?.type).toBe('answer');
+    });
+
+    await act(async () => {
+      const [calleePc, callerPc] = MockRTCPeerConnection.instances;
+      calleePc.triggerConnected(makeFakeAudioTrack('remote-from-caller'));
+      callerPc.triggerConnected(makeFakeAudioTrack('remote-from-callee'));
+    });
+
+    await waitFor(() => {
+      expect(calleeView.getByTestId('callee-fallback-state').textContent).toBe('accepted');
+      expect(callerView.getByTestId('caller-fallback-state').textContent).toBe('accepted');
+    });
   });
 });
