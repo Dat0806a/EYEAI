@@ -31,6 +31,8 @@ export function GoogleMapView({
 
   const [useIframeFallback, setUseIframeFallback] = useState<boolean>(false);
   const [currentZoom, setCurrentZoom] = useState<number>(zoom);
+  const initialCenterRef = useRef(center);
+  const initialZoomRef = useRef(zoom);
 
   // Monitor auth failure for Google Maps JS API key restriction
   useEffect(() => {
@@ -50,19 +52,21 @@ export function GoogleMapView({
   const initMap = useCallback(async () => {
     if (!containerRef.current || useIframeFallback) return;
 
-    if (!apiKey) {
+    const cleanKey = apiKey.trim();
+    if (!cleanKey || cleanKey === 'MY_GOOGLE_MAPS_API_KEY') {
       setUseIframeFallback(true);
       return;
     }
 
     try {
-      await loadGoogleMaps(apiKey);
+      await loadGoogleMaps(cleanKey);
       if (!containerRef.current) return;
 
       if (!mapInstanceRef.current) {
+        const initCenter = initialCenterRef.current;
         const map = new google.maps.Map(containerRef.current, {
-          center,
-          zoom: currentZoom,
+          center: initCenter,
+          zoom: initialZoomRef.current,
           styles: luckydreamMapStyle,
           disableDefaultUI: true,
           zoomControl: false,
@@ -77,7 +81,7 @@ export function GoogleMapView({
         // Create Custom User Marker
         const userMarker = createCustomOverlayMarker(
           map,
-          new google.maps.LatLng(center.lat, center.lng),
+          new google.maps.LatLng(initCenter.lat, initCenter.lng),
           {
             name: 'Bạn',
             isCurrentUser: true,
@@ -86,28 +90,13 @@ export function GoogleMapView({
         );
         userMarkerRef.current = userMarker;
 
-        // Create Accuracy Circle
-        if (accuracy && accuracy > 0) {
-          const circle = new google.maps.Circle({
-            map,
-            center,
-            radius: accuracy,
-            fillColor: '#6AC9F0',
-            fillOpacity: 0.12,
-            strokeColor: '#6AC9F0',
-            strokeOpacity: 0.4,
-            strokeWeight: 1.5,
-          });
-          accuracyCircleRef.current = circle;
-        }
-
         if (onMapLoaded) onMapLoaded();
       }
     } catch (err) {
       console.warn('Maps JS API initialization error, switching to iframe fallback:', err);
       setUseIframeFallback(true);
     }
-  }, [apiKey, useIframeFallback, currentZoom]);
+  }, [apiKey, useIframeFallback]);
 
   useEffect(() => {
     initMap();
@@ -127,6 +116,7 @@ export function GoogleMapView({
 
   // Smooth position & props updates for JS API map
   useEffect(() => {
+    initialCenterRef.current = center;
     if (!mapInstanceRef.current || useIframeFallback) return;
 
     const latLng = new google.maps.LatLng(center.lat, center.lng);
@@ -136,9 +126,20 @@ export function GoogleMapView({
       userMarkerRef.current.updateProps({ isEyeMode });
     }
 
-    if (accuracyCircleRef.current) {
-      accuracyCircleRef.current.setCenter(latLng);
-      if (accuracy && accuracy > 0) {
+    if (accuracy && accuracy > 0) {
+      if (!accuracyCircleRef.current) {
+        accuracyCircleRef.current = new google.maps.Circle({
+          map: mapInstanceRef.current,
+          center,
+          radius: accuracy,
+          fillColor: '#6AC9F0',
+          fillOpacity: 0.12,
+          strokeColor: '#6AC9F0',
+          strokeOpacity: 0.4,
+          strokeWeight: 1.5,
+        });
+      } else {
+        accuracyCircleRef.current.setCenter(latLng);
         accuracyCircleRef.current.setRadius(accuracy);
       }
     }
@@ -186,6 +187,7 @@ export function GoogleMapView({
           width="100%"
           height="100%"
           style={{ border: 0 }}
+          referrerPolicy="strict-origin-when-cross-origin"
           allowFullScreen
           loading="lazy"
           title="Google Maps"

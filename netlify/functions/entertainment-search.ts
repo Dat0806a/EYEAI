@@ -3,7 +3,7 @@ import { buildModeQuery, YouTubeNormalizedResult } from "../../server/youtubeBac
 import { checkInMemoryRateLimit } from "../../server/securityMiddleware";
 
 const MAX_SEARCH_BODY_BYTES = 32 * 1024;
-const ALLOWED_MODES = new Set(["music", "comedy", "relaxation", "movies", "news"]);
+const ALLOWED_MODES = new Set(["books", "radio", "music"]);
 
 function decodeHtmlEntities(str: string): string {
   if (!str) return "";

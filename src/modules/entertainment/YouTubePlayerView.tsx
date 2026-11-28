@@ -10,6 +10,8 @@ import {
   Volume1,
   Volume2,
   VolumeX,
+  AlertCircle,
+  ExternalLink,
 } from 'lucide-react';
 import { YouTubeNormalizedResult } from './types';
 import { EyeFocusable } from '../eye-control/EyeFocusable';
@@ -27,77 +29,189 @@ interface YouTubePlayerViewProps {
   onBack: () => void;
 }
 
-export function YouTubePlayerView({ item, onBack }: YouTubePlayerViewProps) {
-  const [isPlaying, setIsPlaying] = useState<boolean>(true);
-  const [volume, setVolume] = useState<number>(100);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [currentTime, setCurrentTime] = useState<number>(0);
-  const [duration, setDuration] = useState<number>(0);
+const YOUTUBE_NOCOOKIE_ORIGIN = 'https://www.youtube-nocookie.com';
+const YOUTUBE_STANDARD_ORIGIN = 'https://www.youtube.com';
 
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const playerRef = useRef<any>(null);
-  const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
+let ytApiPromise: Promise<void> | null = null;
 
-  useEffect(() => {
-    speakVietnamese(`Mở video ${item.title}`);
+function loadYouTubeIframeApi(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (window.YT && typeof window.YT.Player === 'function') {
+    return Promise.resolve();
+  }
+  if (ytApiPromise) return ytApiPromise;
 
-    const initYTPlayer = () => {
-      if (window.YT && window.YT.Player && iframeRef.current) {
-        try {
-          playerRef.current = new window.YT.Player(iframeRef.current, {
-            events: {
-              onReady: (event: any) => {
-                try {
-                  const vol = event.target.getVolume();
-                  if (typeof vol === 'number') setVolume(vol);
-                  const dur = event.target.getDuration();
-                  if (typeof dur === 'number') setDuration(dur);
-                  const muted = event.target.isMuted();
-                  setIsMuted(!!muted);
-                } catch (e) {
-                  console.warn('Error reading YT player state:', e);
-                }
-              },
-              onStateChange: (event: any) => {
-                // YT.PlayerState.PLAYING = 1, PAUSED = 2, ENDED = 0
-                if (event.data === 1) setIsPlaying(true);
-                else if (event.data === 2 || event.data === 0) setIsPlaying(false);
-              },
-            },
-          });
-        } catch (err) {
-          console.warn('[YouTubePlayerView] Could not attach YT.Player:', err);
-        }
+  ytApiPromise = new Promise<void>((resolve, reject) => {
+    const prevReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      try {
+        if (typeof prevReady === 'function') prevReady();
+      } catch {
+        // ignore previous handler error
       }
+      resolve();
     };
 
-    if (!window.YT) {
+    const existingScript = document.querySelector<HTMLScriptElement>(
+      'script[src*="youtube.com/iframe_api"]'
+    );
+    if (!existingScript) {
       const tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
+      tag.async = true;
+      tag.onerror = () => {
+        ytApiPromise = null;
+        reject(new Error('Không thể tải YouTube IFrame API'));
+      };
       const firstScriptTag = document.getElementsByTagName('script')[0];
       if (firstScriptTag && firstScriptTag.parentNode) {
         firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
       } else {
         document.head.appendChild(tag);
       }
-      window.onYouTubeIframeAPIReady = () => {
-        initYTPlayer();
-      };
-    } else {
-      initYTPlayer();
     }
 
+    // Fallback poll in case onYouTubeIframeAPIReady fired before hook
+    const start = Date.now();
+    const timer = window.setInterval(() => {
+      if (window.YT && typeof window.YT.Player === 'function') {
+        window.clearInterval(timer);
+        resolve();
+      } else if (Date.now() - start > 10000) {
+        window.clearInterval(timer);
+        ytApiPromise = null;
+        reject(new Error('YouTube IFrame API load timeout'));
+      }
+    }, 150);
+  });
+
+  return ytApiPromise;
+}
+
+export function YouTubePlayerView({ item, onBack }: YouTubePlayerViewProps) {
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [volume, setVolume] = useState<number>(100);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(0);
+  const [embedOrigin, setEmbedOrigin] = useState<string>(YOUTUBE_NOCOOKIE_ORIGIN);
+  const [playerError, setPlayerError] = useState<string | null>(null);
+
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const playerRef = useRef<any>(null);
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoplayVerifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setEmbedOrigin(YOUTUBE_NOCOOKIE_ORIGIN);
+    setPlayerError(null);
+    setIsPlaying(true);
+    setCurrentTime(0);
+    setDuration(0);
+    speakVietnamese(`Mở video ${item.title}`);
+  }, [item.videoId, item.title]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const initYTPlayer = () => {
+      if (cancelled || !window.YT || typeof window.YT.Player !== 'function' || !iframeRef.current) {
+        return;
+      }
+      try {
+        playerRef.current = new window.YT.Player(iframeRef.current, {
+          events: {
+            onReady: (event: any) => {
+              if (cancelled) return;
+              try {
+                const vol = event.target.getVolume();
+                if (typeof vol === 'number') setVolume(vol);
+                const dur = event.target.getDuration();
+                if (typeof dur === 'number' && dur > 0) setDuration(dur);
+                const muted = event.target.isMuted();
+                setIsMuted(!!muted);
+
+                const state = event.target.getPlayerState?.();
+                if (state !== 1 && state !== 3 && typeof event.target.playVideo === 'function') {
+                  event.target.playVideo();
+                }
+
+                if (autoplayVerifyTimerRef.current) {
+                  clearTimeout(autoplayVerifyTimerRef.current);
+                }
+                autoplayVerifyTimerRef.current = setTimeout(() => {
+                  if (cancelled) return;
+                  try {
+                    const postState = event.target.getPlayerState?.();
+                    if (postState !== 1 && postState !== 3) {
+                      setIsPlaying(false);
+                    }
+                  } catch {
+                    // ignore
+                  }
+                }, 800);
+              } catch (e) {
+                console.warn('Error reading YT player state:', e);
+              }
+            },
+            onStateChange: (event: any) => {
+              if (cancelled) return;
+              // YT.PlayerState: UNSTARTED=-1, ENDED=0, PLAYING=1, PAUSED=2, BUFFERING=3, CUED=5
+              if (event.data === 1 || event.data === 3) {
+                setIsPlaying(true);
+                setPlayerError(null);
+              } else if (event.data === 2 || event.data === 0 || event.data === 5 || event.data === -1) {
+                setIsPlaying(false);
+              }
+            },
+            onError: (event: any) => {
+              if (cancelled) return;
+              const code = Number(event?.data);
+              console.warn('[YouTubePlayerView] Player error code:', code, 'origin:', embedOrigin);
+              if (embedOrigin === YOUTUBE_NOCOOKIE_ORIGIN) {
+                setEmbedOrigin(YOUTUBE_STANDARD_ORIGIN);
+                return;
+              }
+              setIsPlaying(false);
+              if (code === 101 || code === 150) {
+                setPlayerError('Chủ sở hữu video không cho phép phát nhúng. Bạn có thể mở xem trực tiếp trên YouTube.');
+              } else if (code === 100) {
+                setPlayerError('Video không tồn tại hoặc đã bị đặt ở chế độ riêng tư.');
+              } else {
+                setPlayerError('Không thể trình phát video nhúng lúc này. Vui lòng thử lại hoặc mở trên YouTube.');
+              }
+            },
+          },
+        });
+      } catch (err) {
+        console.warn('[YouTubePlayerView] Could not attach YT.Player:', err);
+      }
+    };
+
+    loadYouTubeIframeApi()
+      .then(() => {
+        if (!cancelled) initYTPlayer();
+      })
+      .catch((err) => {
+        console.warn('[YouTubePlayerView] YouTube IFrame API unavailable:', err);
+      });
+
     return () => {
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      cancelled = true;
+      if (autoplayVerifyTimerRef.current) {
+        clearTimeout(autoplayVerifyTimerRef.current);
+        autoplayVerifyTimerRef.current = null;
+      }
       if (playerRef.current && typeof playerRef.current.destroy === 'function') {
         try {
           playerRef.current.destroy();
-        } catch (e) {
+        } catch {
           // ignore
         }
+        playerRef.current = null;
       }
     };
-  }, [item]);
+  }, [item.videoId, embedOrigin]);
 
   // Periodically update progress time
   useEffect(() => {
@@ -108,7 +222,7 @@ export function YouTubePlayerView({ item, onBack }: YouTubePlayerViewProps) {
           if (typeof cur === 'number') setCurrentTime(cur);
           const dur = playerRef.current.getDuration();
           if (typeof dur === 'number' && dur > 0) setDuration(dur);
-        } catch (e) {
+        } catch {
           // ignore
         }
       }
@@ -119,14 +233,12 @@ export function YouTubePlayerView({ item, onBack }: YouTubePlayerViewProps) {
     };
   }, []);
 
-  const YOUTUBE_EMBED_ORIGIN = 'https://www.youtube-nocookie.com';
-
   const sendPostMessage = (func: string, args: any[] = []) => {
     if (iframeRef.current && iframeRef.current.contentWindow) {
       try {
         iframeRef.current.contentWindow.postMessage(
           JSON.stringify({ event: 'command', func, args }),
-          YOUTUBE_EMBED_ORIGIN
+          embedOrigin
         );
       } catch (e) {
         console.warn('postMessage error:', e);
@@ -224,7 +336,14 @@ export function YouTubePlayerView({ item, onBack }: YouTubePlayerViewProps) {
     return `${pad(minutes)}:${pad(seconds)}`;
   };
 
-  const embedUrl = `https://www.youtube-nocookie.com/embed/${item.videoId}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1`;
+  const appOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const originParams = appOrigin
+    ? `&origin=${encodeURIComponent(appOrigin)}&widget_referrer=${encodeURIComponent(appOrigin)}`
+    : '';
+  const embedUrl = `${embedOrigin}/embed/${encodeURIComponent(
+    item.videoId
+  )}?autoplay=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1${originParams}`;
+  const watchOnYoutubeUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(item.videoId)}`;
   const progressPercent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   return (
@@ -264,15 +383,36 @@ export function YouTubePlayerView({ item, onBack }: YouTubePlayerViewProps) {
       {/* Official YouTube Responsive 16:9 Embedded Player */}
       <div className="relative w-full aspect-video rounded-[18px] overflow-hidden bg-slate-950 border border-[#14213D]/20 shadow-inner">
         <iframe
+          key={`${item.videoId}-${embedOrigin}`}
           ref={iframeRef}
           id="yt-player-iframe"
           src={embedUrl}
           title={item.title}
           className="absolute top-0 left-0 w-full h-full border-0"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          referrerPolicy="strict-origin-when-cross-origin"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
           allowFullScreen
         />
       </div>
+
+      {/* Embed Error Fallback Banner */}
+      {playerError && (
+        <div className="p-3.5 rounded-[16px] bg-amber-50 border-2 border-amber-300 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2 text-xs sm:text-sm font-bold">
+            <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+            <span>{playerError}</span>
+          </div>
+          <a
+            href={watchOnYoutubeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[#FF6F61] hover:bg-[#f06052] text-white font-black text-xs shrink-0 transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span>Mở trên YouTube</span>
+          </a>
+        </div>
+      )}
 
       {/* Progress Bar & Time Display */}
       <div className="flex flex-col gap-1.5 px-1">

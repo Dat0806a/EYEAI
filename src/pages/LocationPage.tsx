@@ -4,6 +4,7 @@ import { AppButton } from '../components/ui/AppButton';
 import { GoogleMapView } from '../modules/location/GoogleMapView';
 import { useGeolocation } from '../modules/location/useGeolocation';
 import { useEyeTrackingSettings } from '../modules/eye-control/useEyeTracking';
+import { useAuth } from '../hooks/useAuth';
 import {
   MapPin,
   Share2,
@@ -22,6 +23,7 @@ interface LocationPageProps {
 
 export function LocationPage({ onBack }: LocationPageProps) {
   const { settings } = useEyeTrackingSettings();
+  const { userId } = useAuth();
   const isEyeMode = settings.eyeControlEnabled;
 
   const {
@@ -30,8 +32,8 @@ export function LocationPage({ onBack }: LocationPageProps) {
     accuracy,
     errorMessage,
     isRealGps,
-    refreshLocation,
-  } = useGeolocation(true);
+    enableAndRefreshLocation,
+  } = useGeolocation(true, userId);
 
   const [shareSuccess, setShareSuccess] = useState<boolean>(false);
   const [showCoordsDetail, setShowCoordsDetail] = useState<boolean>(false);
@@ -42,8 +44,8 @@ export function LocationPage({ onBack }: LocationPageProps) {
     '';
 
   const handleRefresh = () => {
-    refreshLocation();
-    speakVietnamese('Đang định vị lại vị trí GPS');
+    enableAndRefreshLocation();
+    speakVietnamese('Đang bật và định vị lại vị trí GPS');
   };
 
   const handleShareLocation = () => {
@@ -53,6 +55,11 @@ export function LocationPage({ onBack }: LocationPageProps) {
   };
 
   const formattedCoords = `${coords.lat.toFixed(4)}° N, ${coords.lng.toFixed(4)}° E`;
+  const hasGpsIssue =
+    status === 'PERMISSION_DENIED' ||
+    status === 'UNAVAILABLE' ||
+    status === 'TIMEOUT' ||
+    status === 'ERROR';
 
   return (
     <div className="min-h-screen bg-[#FFF2D6] text-[#14213D] flex flex-col pb-10 select-none relative overflow-hidden">
@@ -65,15 +72,21 @@ export function LocationPage({ onBack }: LocationPageProps) {
 
       <main className="flex-1 max-w-lg md:max-w-xl mx-auto w-full px-4 py-3 flex flex-col gap-4 relative z-10">
 
-        {/* Permission Denied Card */}
-        {status === 'PERMISSION_DENIED' && (
+        {/* GPS Error / Permission Denied Card */}
+        {hasGpsIssue && (
           <div className="bg-white rounded-[24px] p-4 border-2 border-[#FF6F61]/40 shadow-sm flex flex-col gap-3">
             <div className="flex items-start gap-3">
               <div className="p-2.5 rounded-[14px] bg-[#FF6F61]/15 text-[#FF6F61] border border-[#FF6F61]/30">
                 <AlertCircle className="w-5 h-5" />
               </div>
               <div className="flex-1">
-                <h3 className="font-black text-sm text-[#14213D]">Chưa bật quyền vị trí GPS</h3>
+                <h3 className="font-black text-sm text-[#14213D]">
+                  {status === 'PERMISSION_DENIED'
+                    ? 'Chưa bật quyền vị trí GPS'
+                    : status === 'TIMEOUT'
+                    ? 'Định vị GPS quá thời gian'
+                    : 'Chưa lấy được tín hiệu GPS'}
+                </h3>
                 <p className="text-xs text-[#3B4B68] mt-0.5 leading-relaxed">
                   {errorMessage || 'Vui lòng cấp quyền vị trí để ứng dụng định vị chính xác vị trí của bạn.'}
                 </p>
@@ -88,7 +101,7 @@ export function LocationPage({ onBack }: LocationPageProps) {
               onClick={handleRefresh}
               icon={<Navigation className="w-4 h-4" />}
             >
-              <span>CHO PHÉP ĐỊNH VỊ LẠI</span>
+              <span>{status === 'PERMISSION_DENIED' ? 'BẬT GPS & ĐỊNH VỊ LẠI' : 'THỬ ĐỊNH VỊ LẠI'}</span>
             </AppButton>
           </div>
         )}
@@ -101,7 +114,12 @@ export function LocationPage({ onBack }: LocationPageProps) {
             zoom={16}
             accuracy={accuracy}
             isEyeMode={isEyeMode}
-            onRecenter={() => speakVietnamese('Đã đưa bản đồ về vị trí của bạn')}
+            onRecenter={() => {
+              if (!isRealGps) {
+                enableAndRefreshLocation();
+              }
+              speakVietnamese('Đã đưa bản đồ về vị trí của bạn');
+            }}
           />
         </div>
 
@@ -117,10 +135,22 @@ export function LocationPage({ onBack }: LocationPageProps) {
                 <span className="text-[11px] font-black text-[#3B4B68] uppercase tracking-wider">
                   Vị trí hiện tại
                 </span>
-                <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/80 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  {status === 'LOCATED' && isRealGps ? '● GPS chính xác' : 'Đang định vị...'}
-                </span>
+                {status === 'LOCATED' && isRealGps ? (
+                  <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/80 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    GPS chính xác
+                  </span>
+                ) : hasGpsIssue ? (
+                  <span className="text-[11px] font-extrabold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    {status === 'PERMISSION_DENIED' ? 'Chưa bật GPS' : 'Vị trí dự phòng'}
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-extrabold text-[#0E6C99] bg-sky-50 px-2.5 py-0.5 rounded-full border border-sky-200 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#0E6C99] animate-pulse" />
+                    Đang định vị...
+                  </span>
+                )}
               </div>
               
               <h2 className="font-black text-lg md:text-xl text-[#14213D] mt-0.5 tracking-tight">

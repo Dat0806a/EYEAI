@@ -221,13 +221,20 @@ export function ImpairedPermissionsModal({
           setStatuses(prev => ({ ...prev, geolocation: 'granted' }));
           resolve('granted');
         },
-        err => {
+        async err => {
+          if (err?.code === 1) {
+            setStatuses(prev => ({ ...prev, geolocation: 'denied' }));
+            resolve('denied');
+            return;
+          }
+          // POSITION_UNAVAILABLE (2) or TIMEOUT (3): check browser Permissions API before assuming denied/prompt
+          const queriedStatus = await queryBrowserPermission('geolocation');
           const nextStatus: DevicePermissionStatus =
-            err?.code === 1 ? 'denied' : 'prompt';
+            queriedStatus === 'granted' || queriedStatus === 'denied' ? queriedStatus : 'prompt';
           setStatuses(prev => ({ ...prev, geolocation: nextStatus }));
           resolve(nextStatus);
         },
-        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+        { enableHighAccuracy: false, timeout: 6000, maximumAge: 60000 }
       );
     });
   }, []);
@@ -288,6 +295,14 @@ export function ImpairedPermissionsModal({
       setFeedbackMessage(
         'Một số quyền đã bị chặn trên trình duyệt. Bạn có thể bấm biểu tượng ổ khóa trên thanh địa chỉ để cấp lại quyền bất cứ lúc nào.'
       );
+    } else if (key === 'geolocation') {
+      // Browser did not deny GPS, but coordinate fix timed out / unavailable on this device right now.
+      // Keep user's GPS preference ON so LocationPage can retry with fallback options.
+      const nextPrefs = { ...enabledPrefs, geolocation: true };
+      persistPrefs(nextPrefs);
+      setFeedbackMessage(
+        'Đã bật tùy chọn GPS. Thiết bị chưa lấy được tọa độ ngay lúc này, hệ thống sẽ tự định vị khi bạn mở mục Vị trí.'
+      );
     }
   };
 
@@ -305,9 +320,11 @@ export function ImpairedPermissionsModal({
         continue;
       }
       const result = await requestSinglePermission(item.key);
-      if (result !== 'granted') {
+      if (result === 'denied') {
         nextPrefs[item.key] = false;
-        if (result === 'denied') anyDenied = true;
+        anyDenied = true;
+      } else if (result !== 'granted' && item.key !== 'geolocation') {
+        nextPrefs[item.key] = false;
       }
     }
 

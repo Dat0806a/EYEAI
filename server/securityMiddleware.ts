@@ -9,8 +9,8 @@ export const SECURITY_CSP_POLICY = [
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' blob: data:",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com",
-  "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://maps.gstatic.com",
+  "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://www.google.com https://maps.google.com",
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",
@@ -29,7 +29,7 @@ export function applyBrowserSecurityHeaders(
   res.setHeader('Content-Security-Policy', SECURITY_CSP_POLICY);
   res.setHeader('Permissions-Policy', SECURITY_PERMISSIONS_POLICY);
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   next();
 }

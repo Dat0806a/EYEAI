@@ -152,4 +152,27 @@ describe('ImpairedPermissionsModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /Để sau/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps GPS preference enabled when geolocation times out instead of forcing GPS OFF', async () => {
+    getCurrentPositionMock.mockImplementation((_success: PositionCallback, error?: PositionErrorCallback) => {
+      error?.({
+        code: 3,
+        message: 'Timeout expired',
+        PERMISSION_DENIED: 1,
+        POSITION_UNAVAILABLE: 2,
+        TIMEOUT: 3,
+      } as GeolocationPositionError);
+    });
+
+    const onClose = vi.fn();
+    render(<ImpairedPermissionsModal isOpen userId="u_gps_timeout" onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Cấp quyền & Tiếp tục/i }));
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    expect(readDevicePermissions('u_gps_timeout').geolocation).toBe(true);
+  });
 });
