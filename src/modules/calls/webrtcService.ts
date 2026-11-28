@@ -58,7 +58,10 @@ export class WebRTCService {
     this.pc.ontrack = event => {
       console.log('[CALL][MEDIA] Remote track received:', event.track.kind, 'ID:', event.track.id, 'readyState:', event.track.readyState);
       if (event.track) {
-        this.remoteStream.addTrack(event.track);
+        const alreadyAdded = this.remoteStream.getTracks().some(t => t.id === event.track.id);
+        if (!alreadyAdded) {
+          this.remoteStream.addTrack(event.track);
+        }
         // Create new MediaStream reference for React state change detection
         const updatedStream = new MediaStream(this.remoteStream.getTracks());
         this.callbacks.onRemoteStream(updatedStream);
@@ -77,6 +80,9 @@ export class WebRTCService {
     this.pc.oniceconnectionstatechange = () => {
       if (this.pc) {
         console.log('[CALL][ICE] ICE connection state changed to:', this.pc.iceConnectionState);
+        if (this.pc.iceConnectionState === 'failed' && this.pc.connectionState !== 'failed') {
+          this.callbacks.onConnectionStateChange('failed');
+        }
       }
     };
 
@@ -145,6 +151,10 @@ export class WebRTCService {
    */
   public async handleAnswer(answerSdp: RTCSessionDescriptionInit): Promise<void> {
     if (!this.pc) return;
+    if (this.pc.signalingState !== 'have-local-offer') {
+      console.warn('[CALL][WEBRTC] Ignoring answer in unexpected signalingState:', this.pc.signalingState);
+      return;
+    }
     console.log('[CALL][WEBRTC] Setting remote description (Answer)...');
     await this.pc.setRemoteDescription(new RTCSessionDescription(answerSdp));
     console.log('[CALL][WEBRTC] Remote answer set successfully. Signaling state:', this.pc.signalingState);

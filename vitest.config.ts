@@ -18,6 +18,8 @@ export default defineConfig({
       'src/experiences/patient/**/*.test.tsx',
       'src/modules/eye-control/**/*.test.ts',
       'src/modules/eye-control/**/*.test.tsx',
+      'src/modules/calls/**/*.test.ts',
+      'src/modules/calls/**/*.test.tsx',
       'src/components/**/*.test.ts',
       'src/components/**/*.test.tsx',
     ],

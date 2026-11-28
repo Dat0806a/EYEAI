@@ -202,10 +202,6 @@ export function HumanChatPage({ friend, onBack }: HumanChatPageProps) {
             >
               <button
                 type="button"
-                onClick={() => {
-                  console.log('[CALL][UI] Voice Call button clicked for:', friend.name);
-                  startCall(friend.id, friend.name, 'voice', friend.avatarUrl);
-                }}
                 className="p-3 rounded-2xl bg-[#6AC9F0] hover:bg-[#5bbce3] text-[#14213D] font-bold shadow-sm active:scale-95 flex items-center justify-center cursor-pointer"
                 title="Gọi thoại"
               >

@@ -2,6 +2,8 @@ import { supabase } from '../../lib/supabase';
 import { SignalingPayload } from '../../types/chat';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
+const channelReadyPromises = new WeakMap<RealtimeChannel, Promise<boolean>>();
+
 export const signalingService = {
   /**
    * Subscribe to user's global incoming signaling channel (for call:ring)
@@ -43,22 +45,42 @@ export const signalingService = {
     });
 
     return new Promise(resolve => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve(ok);
+      };
+
+      const timeoutId = setTimeout(() => {
+        console.warn(`[CALL][SIGNAL] Timed out sending signal to ${channelName}`);
+        supabase.removeChannel(channel);
+        finish(false);
+      }, 8000);
+
       channel.subscribe(async status => {
         if (status === 'SUBSCRIBED') {
-          console.log(`[CALL][SIGNAL] Sending ring to target user channel ${channelName}`);
-          await channel.send({
-            type: 'broadcast',
-            event: 'webrtc_signal',
-            payload,
-          });
-          setTimeout(() => {
+          console.log(`[CALL][SIGNAL] Sending ${payload.type} to target user channel ${channelName}`);
+          try {
+            const sendResult = await channel.send({
+              type: 'broadcast',
+              event: 'webrtc_signal',
+              payload,
+            });
+            setTimeout(() => {
+              supabase.removeChannel(channel);
+            }, 1000);
+            finish(sendResult === 'ok');
+          } catch (err) {
+            console.warn(`[CALL][SIGNAL] Error sending signal to ${channelName}:`, err);
             supabase.removeChannel(channel);
-          }, 1000);
-          resolve(true);
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            finish(false);
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           console.warn(`[CALL][SIGNAL] Failed to subscribe to ${channelName}:`, status);
           supabase.removeChannel(channel);
-          resolve(false);
+          finish(false);
         }
       });
     });
@@ -73,6 +95,22 @@ export const signalingService = {
   ): RealtimeChannel {
     const channelName = `call_room_${callId}`;
     console.log(`[CALL][SIGNAL] Joining dedicated call room channel: ${channelName}`);
+
+    let resolveReady!: (ready: boolean) => void;
+    let settled = false;
+    const readyPromise = new Promise<boolean>(resolve => {
+      resolveReady = (ready: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve(ready);
+      };
+    });
+
+    const timeoutId = setTimeout(() => {
+      console.warn(`[CALL][SIGNAL] Timed out waiting for ${channelName} subscription`);
+      resolveReady(false);
+    }, 10000);
 
     const channel = supabase
       .channel(channelName, {
@@ -89,13 +127,29 @@ export const signalingService = {
       })
       .subscribe(status => {
         console.log(`[CALL][SIGNAL] Room ${channelName} status:`, status);
+        if (status === 'SUBSCRIBED') {
+          resolveReady(true);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          resolveReady(false);
+        }
       });
 
+    channelReadyPromises.set(channel, readyPromise);
     return channel;
   },
 
   /**
-   * Broadcast a payload instantly over an active Call Room channel
+   * Wait until the Call Room channel finishes subscribing before sending/accepting WebRTC signals
+   */
+  async waitForCallRoomReady(channel: RealtimeChannel | null): Promise<boolean> {
+    if (!channel) return false;
+    const readyPromise = channelReadyPromises.get(channel);
+    if (!readyPromise) return true;
+    return readyPromise;
+  },
+
+  /**
+   * Broadcast a payload over an active Call Room channel (waiting for subscription readiness first)
    */
   async sendToCallRoom(channel: RealtimeChannel | null, payload: SignalingPayload): Promise<boolean> {
     if (!channel) {
@@ -103,13 +157,23 @@ export const signalingService = {
       return false;
     }
 
+    const ready = await this.waitForCallRoomReady(channel);
+    if (!ready) {
+      console.warn(`[CALL][SIGNAL] Call room not subscribed before sending ${payload.type}`);
+      return false;
+    }
+
     try {
       console.log(`[CALL][SIGNAL] Broadcasting to room event: ${payload.type}`);
-      await channel.send({
+      const sendResult = await channel.send({
         type: 'broadcast',
         event: 'webrtc_signal',
         payload,
       });
+      if (sendResult !== 'ok') {
+        console.warn(`[CALL][SIGNAL] Broadcast ${payload.type} returned status:`, sendResult);
+        return false;
+      }
       return true;
     } catch (err) {
       console.warn('[CALL][SIGNAL] Failed to send broadcast to call room:', err);

@@ -45,14 +45,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
   const callTimerRef = useRef<number | null>(null);
   const connectTimeoutRef = useRef<number | null>(null);
+  const disconnectGraceTimerRef = useRef<number | null>(null);
+  const localMediaPromiseRef = useRef<Promise<MediaStream> | null>(null);
+
+  const isStartingCallRef = useRef(false);
+  const isAcceptingCallRef = useRef(false);
+  const offerSentRef = useRef(false);
+  const answerSentRef = useRef(false);
+  const calleeAcceptedRef = useRef(false);
+  const calleeMediaReadyRef = useRef(false);
 
   const callStateRef = useRef<CallStatus>('idle');
   const callSessionRef = useRef<CallSession | null>(null);
   const profileRef = useRef(profile);
+  const currentUserIdRef = useRef<string | undefined>(user?.id);
+  const handleRoomSignalingRef = useRef<(payload: SignalingPayload) => Promise<void>>(async () => {});
 
   const currentUserId = user?.id;
 
   // Synchronize refs
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
+
   useEffect(() => {
     callStateRef.current = callState;
   }, [callState]);
@@ -65,6 +80,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
     profileRef.current = profile;
   }, [profile]);
 
+  const resetCallNegotiationRefs = () => {
+    pendingOfferRef.current = null;
+    localMediaPromiseRef.current = null;
+    isStartingCallRef.current = false;
+    isAcceptingCallRef.current = false;
+    offerSentRef.current = false;
+    answerSentRef.current = false;
+    calleeAcceptedRef.current = false;
+    calleeMediaReadyRef.current = false;
+  };
+
   /**
    * Get or create WebRTCService singleton (STABLE LIFECYCLE)
    */
@@ -73,16 +99,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
       console.log('[CALL][WEBRTC] Instantiating new WebRTCService instance');
       webrtcRef.current = new WebRTCService({
         onIceCandidate: candidate => {
-          if (callSessionRef.current && currentUserId && callRoomChannelRef.current) {
+          const activeSession = callSessionRef.current;
+          const uid = currentUserIdRef.current;
+          if (activeSession && uid && callRoomChannelRef.current) {
             const targetId =
-              callSessionRef.current.caller_id === currentUserId
-                ? callSessionRef.current.callee_id
-                : callSessionRef.current.caller_id;
+              activeSession.caller_id === uid
+                ? activeSession.callee_id
+                : activeSession.caller_id;
             console.log('[CALL][WEBRTC] Broadcasting ICE candidate to room');
-            signalingService.sendToCallRoom(callRoomChannelRef.current, {
+            void signalingService.sendToCallRoom(callRoomChannelRef.current, {
               type: 'webrtc:ice-candidate',
-              callId: callSessionRef.current.id,
-              senderId: currentUserId,
+              callId: activeSession.id,
+              senderId: uid,
               receiverId: targetId,
               senderName: profileRef.current?.display_name || 'Người dùng',
               candidate,
@@ -97,7 +125,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
           console.log('[CALL][WEBRTC] Connection state transitioned to:', state);
           if (state === 'connected') {
             if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+            if (disconnectGraceTimerRef.current) {
+              clearTimeout(disconnectGraceTimerRef.current);
+              disconnectGraceTimerRef.current = null;
+            }
             setCallState('accepted');
+            callStateRef.current = 'accepted';
             speakVietnamese('Âm thanh cuộc gọi đã kết nối');
             if (webrtcRef.current) {
               await webrtcRef.current.getRtpStats();
@@ -105,8 +138,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
           } else if (state === 'failed') {
             console.warn('[CALL][WEBRTC] Connection state FAILED');
             if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+            if (disconnectGraceTimerRef.current) {
+              clearTimeout(disconnectGraceTimerRef.current);
+              disconnectGraceTimerRef.current = null;
+            }
             setCallState('failed');
+            callStateRef.current = 'failed';
           } else if (state === 'disconnected') {
+            if (!disconnectGraceTimerRef.current) {
+              console.warn('[CALL][WEBRTC] Connection transiently disconnected, waiting 5s for ICE recovery...');
+              disconnectGraceTimerRef.current = window.setTimeout(() => {
+                disconnectGraceTimerRef.current = null;
+                console.warn('[CALL][WEBRTC] Connection did not recover from disconnected state, cleaning up');
+                handleCleanup();
+              }, 5000);
+            }
+          } else if (state === 'closed') {
             handleCleanup();
           }
         },
@@ -116,22 +163,100 @@ export function CallProvider({ children }: { children: ReactNode }) {
   };
 
   /**
+   * Create and broadcast SDP Answer once both offer and callee local stream are ready
+   */
+  const createAndSendAnswer = async (offerSdp: RTCSessionDescriptionInit) => {
+    const activeSession = callSessionRef.current;
+    const uid = currentUserIdRef.current;
+    if (!activeSession || !uid || answerSentRef.current) return;
+
+    answerSentRef.current = true;
+    try {
+      const webrtc = getWebRTCService();
+      console.log('[CALL][WEBRTC] Creating answer SDP for offer');
+      const answer = await webrtc.createAnswer(offerSdp);
+      console.log('[CALL][SIGNAL] Broadcasting webrtc:answer to Call Room');
+      await signalingService.sendToCallRoom(callRoomChannelRef.current, {
+        type: 'webrtc:answer',
+        callId: activeSession.id,
+        senderId: uid,
+        receiverId: activeSession.caller_id,
+        senderName: profileRef.current?.display_name || 'Người dùng',
+        sdp: answer,
+      });
+    } catch (err) {
+      answerSentRef.current = false;
+      console.error('[CALL][WEBRTC] Failed to create/send answer:', err);
+      setCallState('failed');
+      callStateRef.current = 'failed';
+    }
+  };
+
+  /**
    * Handle WebRTC signaling events inside the dedicated Call Room
    */
   const handleRoomSignaling = async (payload: SignalingPayload) => {
+    const activeSession = callSessionRef.current;
+    const uid = currentUserIdRef.current;
+    if (!activeSession || payload.callId !== activeSession.id) {
+      return;
+    }
+    if (uid && payload.senderId === uid) {
+      return;
+    }
+
     console.log('[CALL][SIGNAL] Call Room received event:', payload.type, 'from:', payload.senderName);
 
     switch (payload.type) {
       case 'call:accept': {
         console.log('[CALL][SIGNAL] Receiver accepted call');
+        if (callTimerRef.current) clearTimeout(callTimerRef.current);
         setCallState('connecting');
+        callStateRef.current = 'connecting';
         startConnectTimeout();
+
+        // Caller initiates SDP Offer only after callee has joined room and accepted
+        if (uid && activeSession.caller_id === uid && !offerSentRef.current) {
+          offerSentRef.current = true;
+          try {
+            const stream = localMediaPromiseRef.current
+              ? await localMediaPromiseRef.current
+              : await acquireMediaStream('voice');
+            if (callSessionRef.current?.id !== activeSession.id) return;
+
+            const webrtc = getWebRTCService();
+            webrtc.addLocalStream(stream);
+            const offer = await webrtc.createOffer();
+            console.log('[CALL][SIGNAL] Broadcasting webrtc:offer over Call Room channel');
+            await signalingService.sendToCallRoom(callRoomChannelRef.current, {
+              type: 'webrtc:offer',
+              callId: activeSession.id,
+              senderId: uid,
+              receiverId: activeSession.callee_id,
+              senderName: profileRef.current?.display_name || 'Người dùng',
+              sdp: offer,
+            });
+          } catch (err) {
+            offerSentRef.current = false;
+            console.error('[CALL][WEBRTC] Failed to create/send offer after accept:', err);
+            setCallState('failed');
+            callStateRef.current = 'failed';
+          }
+        }
         break;
       }
 
       case 'webrtc:offer': {
         console.log('[CALL][WEBRTC] Received offer SDP from:', payload.senderName);
         pendingOfferRef.current = payload.sdp || null;
+        if (
+          pendingOfferRef.current &&
+          calleeAcceptedRef.current &&
+          calleeMediaReadyRef.current &&
+          !answerSentRef.current
+        ) {
+          await createAndSendAnswer(pendingOfferRef.current);
+        }
         break;
       }
 
@@ -161,15 +286,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  handleRoomSignalingRef.current = handleRoomSignaling;
+
   // Global Signaling Listener for Current User (Incoming ring notification) - gated by mfaSatisfied
   useEffect(() => {
     if (!currentUserId || !mfaSatisfied) return;
 
     const channel = signalingService.subscribeToUserSignaling(currentUserId, async payload => {
       if (payload.type === 'call:ring') {
+        if (callSessionRef.current?.id === payload.callId) {
+          return;
+        }
         if (callStateRef.current !== 'idle') {
           console.log('[CALL][Realtime] User is busy, declining incoming call:', payload.callId);
-          signalingService.sendUserSignal(payload.senderId, {
+          void signalingService.sendUserSignal(payload.senderId, {
             type: 'call:decline',
             callId: payload.callId,
             senderId: currentUserId,
@@ -180,7 +310,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        setCallSession({
+        resetCallNegotiationRefs();
+        const incomingSession: CallSession = {
           id: payload.callId,
           caller_id: payload.senderId,
           callee_id: currentUserId,
@@ -189,7 +320,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
           type: payload.callType || 'voice',
           status: 'ringing',
           created_at: new Date().toISOString(),
-        });
+        };
+        callSessionRef.current = incomingSession;
+        callStateRef.current = 'ringing';
+        setCallSession(incomingSession);
         setCallState('ringing');
         speakVietnamese(`Có cuộc gọi thoại đến từ ${payload.senderName}`);
 
@@ -197,7 +331,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (callRoomChannelRef.current) {
           supabase.removeChannel(callRoomChannelRef.current);
         }
-        callRoomChannelRef.current = signalingService.joinCallRoom(payload.callId, handleRoomSignaling);
+        callRoomChannelRef.current = signalingService.joinCallRoom(payload.callId, roomPayload =>
+          handleRoomSignalingRef.current(roomPayload)
+        );
+      } else if (payload.type === 'call:hangup' || payload.type === 'call:decline') {
+        if (callSessionRef.current?.id === payload.callId) {
+          speakVietnamese('Cuộc gọi đã kết thúc');
+          handleCleanup();
+        }
       }
     });
 
@@ -205,6 +346,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       supabase.removeChannel(channel);
     };
   }, [currentUserId, mfaSatisfied]);
+
+  useEffect(() => {
+    return () => {
+      handleCleanup();
+    };
+  }, []);
 
   /**
    * Start 20s Connection Timeout Safety Gate
@@ -269,13 +416,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
       console.warn('[CALL] Cannot start call: User not authenticated');
       return;
     }
+    if (callStateRef.current !== 'idle' || isStartingCallRef.current) {
+      console.warn('[CALL] Ignoring startCall: call already active or starting');
+      return;
+    }
 
+    resetCallNegotiationRefs();
+    isStartingCallRef.current = true;
     console.log('[CALL][UI] Starting voice call to:', friendName, 'ID:', friendId);
 
     // 1. Create DB call session row
     let callId = crypto.randomUUID();
     try {
-      const { data: callRow } = await supabase
+      const { data: callRow, error: callInsertError } = await supabase
         .from('calls')
         .insert({
           caller_id: currentUserId,
@@ -286,7 +439,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         .select('id')
         .single();
 
-      if (callRow?.id) {
+      if (callInsertError) {
+        console.warn('[CALL][DB] Failed to insert call row:', callInsertError.message);
+      } else if (callRow?.id) {
         callId = callRow.id;
         console.log('[CALL][DB] Inserted call row into database with ID:', callId);
       }
@@ -307,6 +462,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
 
     // 2. Update UI state to outgoing_ringing & Join Call Room
+    callSessionRef.current = session;
+    callStateRef.current = 'ringing';
     setCallSession(session);
     setCallState('ringing');
     speakVietnamese(`Đang gọi thoại cho ${friendName}`);
@@ -314,11 +471,28 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (callRoomChannelRef.current) {
       supabase.removeChannel(callRoomChannelRef.current);
     }
-    callRoomChannelRef.current = signalingService.joinCallRoom(callId, handleRoomSignaling);
+    callRoomChannelRef.current = signalingService.joinCallRoom(callId, roomPayload =>
+      handleRoomSignalingRef.current(roomPayload)
+    );
 
-    // 3. Send ring notification to Callee's global incoming channel
+    // 3. Acquire microphone in parallel while waiting for Call Room subscription
+    localMediaPromiseRef.current = acquireMediaStream('voice');
+    const roomReady = await signalingService.waitForCallRoomReady(callRoomChannelRef.current);
+    if (callSessionRef.current?.id !== callId) {
+      isStartingCallRef.current = false;
+      return;
+    }
+    if (!roomReady) {
+      console.warn('[CALL][SIGNAL] Caller failed to subscribe to call room');
+      setCallState('failed');
+      callStateRef.current = 'failed';
+      isStartingCallRef.current = false;
+      return;
+    }
+
+    // 4. Send ring notification to Callee's global incoming channel
     console.log('[CALL][SIGNAL] Sending call:ring signal to callee global channel:', friendId);
-    await signalingService.sendUserSignal(friendId, {
+    const ringSent = await signalingService.sendUserSignal(friendId, {
       type: 'call:ring',
       callId,
       senderId: currentUserId,
@@ -328,108 +502,113 @@ export function CallProvider({ children }: { children: ReactNode }) {
       callType: 'voice',
     });
 
-    // 4. Acquire Media Stream & Init WebRTC Offer
-    const stream = await acquireMediaStream('voice');
-    const webrtc = getWebRTCService();
-    webrtc.addLocalStream(stream);
-    const offer = await webrtc.createOffer();
+    if (!ringSent) {
+      console.warn('[CALL][SIGNAL] Failed to deliver call:ring to callee');
+    }
 
-    // 5. Broadcast offer over Call Room
-    console.log('[CALL][SIGNAL] Broadcasting webrtc:offer over Call Room channel');
-    await signalingService.sendToCallRoom(callRoomChannelRef.current, {
-      type: 'webrtc:offer',
-      callId,
-      senderId: currentUserId,
-      receiverId: friendId,
-      senderName: profile?.display_name || 'Người dùng',
-      sdp: offer,
-    });
-
-    // 6. Ringing Timeout (30s)
+    // 5. Ringing Timeout (30s)
     callTimerRef.current = window.setTimeout(() => {
       if (callStateRef.current === 'ringing') {
         speakVietnamese('Người thân không nghe máy');
-        endCall();
+        void endCall();
       }
     }, 30000);
+
+    isStartingCallRef.current = false;
   };
 
   /**
-   * Accept Incoming Voice Call
-   */
-  /**
    * Chap nhan cuoc goi thoai WebRTC den.
-   * - Xin quyen su dung micro, khoi tao ket noi ngang hang va gui tin hieu phan hoi SDP Answer cho nguoi goi qua Supabase.
-   * - Cap nhat trang thai cuoc goi sang `connected` de bat dau trao doi am thanh.
+   * - Xin quyen su dung micro, doi room san sang va gui `call:accept` cho nguoi goi.
+   * - Cho/phan hoi SDP Offer bang SDP Answer qua Supabase Call Room.
    */
   const acceptCall = async () => {
-    if (!callSession || !currentUserId) return;
+    const activeSession = callSessionRef.current;
+    if (!activeSession || !currentUserId) return;
+    if (isAcceptingCallRef.current || calleeAcceptedRef.current) return;
 
-    console.log('[CALL][UI] Accepting incoming voice call from:', callSession.caller_name);
+    isAcceptingCallRef.current = true;
+    console.log('[CALL][UI] Accepting incoming voice call from:', activeSession.caller_name);
     if (callTimerRef.current) clearTimeout(callTimerRef.current);
     setCallState('connecting');
+    callStateRef.current = 'connecting';
     startConnectTimeout();
 
     try {
       await supabase
         .from('calls')
         .update({ status: 'accepted', answered_at: new Date().toISOString() })
-        .eq('id', callSession.id);
+        .eq('id', activeSession.id);
     } catch {
       // Ignore
     }
 
     const stream = await acquireMediaStream('voice');
+    if (callSessionRef.current?.id !== activeSession.id) {
+      isAcceptingCallRef.current = false;
+      return;
+    }
+
     const webrtc = getWebRTCService();
     webrtc.addLocalStream(stream);
+    calleeMediaReadyRef.current = true;
 
-    // 1. Broadcast call:accept over Call Room
+    // Wait until Callee is subscribed to Call Room BEFORE sending call:accept
+    const roomReady = await signalingService.waitForCallRoomReady(callRoomChannelRef.current);
+    if (callSessionRef.current?.id !== activeSession.id) {
+      isAcceptingCallRef.current = false;
+      return;
+    }
+    if (!roomReady) {
+      console.warn('[CALL][SIGNAL] Callee failed to subscribe to call room');
+      setCallState('failed');
+      callStateRef.current = 'failed';
+      isAcceptingCallRef.current = false;
+      return;
+    }
+
+    calleeAcceptedRef.current = true;
+
+    // 1. Broadcast call:accept over Call Room so Caller generates Offer & ICE candidates
     console.log('[CALL][SIGNAL] Broadcasting call:accept to Call Room');
     await signalingService.sendToCallRoom(callRoomChannelRef.current, {
       type: 'call:accept',
-      callId: callSession.id,
+      callId: activeSession.id,
       senderId: currentUserId,
-      receiverId: callSession.caller_id,
-      senderName: profile?.display_name || 'Người dùng',
+      receiverId: activeSession.caller_id,
+      senderName: profileRef.current?.display_name || 'Người dùng',
     });
 
-    // 2. Broadcast webrtc:answer over Call Room
-    if (pendingOfferRef.current) {
-      console.log('[CALL][WEBRTC] Creating answer SDP for offer');
-      const answer = await webrtc.createAnswer(pendingOfferRef.current);
-      console.log('[CALL][SIGNAL] Broadcasting webrtc:answer to Call Room');
-      await signalingService.sendToCallRoom(callRoomChannelRef.current, {
-        type: 'webrtc:answer',
-        callId: callSession.id,
-        senderId: currentUserId,
-        receiverId: callSession.caller_id,
-        senderName: profile?.display_name || 'Người dùng',
-        sdp: answer,
-      });
+    // 2. If an offer already arrived early, answer immediately
+    if (pendingOfferRef.current && !answerSentRef.current) {
+      await createAndSendAnswer(pendingOfferRef.current);
     }
+
+    isAcceptingCallRef.current = false;
   };
 
   /**
    * Decline Incoming Call
    */
   const declineCall = async () => {
-    if (callSession && currentUserId) {
-      console.log('[CALL][UI] Declining incoming call from:', callSession.caller_name);
+    const activeSession = callSessionRef.current;
+    if (activeSession && currentUserId) {
+      console.log('[CALL][UI] Declining incoming call from:', activeSession.caller_name);
       try {
         await supabase
           .from('calls')
           .update({ status: 'declined', ended_at: new Date().toISOString() })
-          .eq('id', callSession.id);
+          .eq('id', activeSession.id);
       } catch {
         // Ignore
       }
 
       await signalingService.sendToCallRoom(callRoomChannelRef.current, {
         type: 'call:decline',
-        callId: callSession.id,
+        callId: activeSession.id,
         senderId: currentUserId,
-        receiverId: callSession.caller_id,
-        senderName: profile?.display_name || 'Người dùng',
+        receiverId: activeSession.caller_id,
+        senderName: profileRef.current?.display_name || 'Người dùng',
       });
     }
     handleCleanup();
@@ -439,26 +618,33 @@ export function CallProvider({ children }: { children: ReactNode }) {
    * End Active Call
    */
   const endCall = async () => {
-    if (callSession && currentUserId) {
-      console.log('[CALL][UI] Ending call session:', callSession.id);
-      const targetId = callSession.caller_id === currentUserId ? callSession.callee_id : callSession.caller_id;
+    const activeSession = callSessionRef.current;
+    const wasRinging = callStateRef.current === 'ringing';
+    if (activeSession && currentUserId) {
+      console.log('[CALL][UI] Ending call session:', activeSession.id);
+      const targetId = activeSession.caller_id === currentUserId ? activeSession.callee_id : activeSession.caller_id;
 
       try {
         await supabase
           .from('calls')
           .update({ status: 'ended', ended_at: new Date().toISOString() })
-          .eq('id', callSession.id);
+          .eq('id', activeSession.id);
       } catch {
         // Ignore
       }
 
-      await signalingService.sendToCallRoom(callRoomChannelRef.current, {
+      const hangupPayload: SignalingPayload = {
         type: 'call:hangup',
-        callId: callSession.id,
+        callId: activeSession.id,
         senderId: currentUserId,
         receiverId: targetId,
-        senderName: profile?.display_name || 'Người dùng',
-      });
+        senderName: profileRef.current?.display_name || 'Người dùng',
+      };
+
+      await signalingService.sendToCallRoom(callRoomChannelRef.current, hangupPayload);
+      if (wasRinging && activeSession.caller_id === currentUserId) {
+        await signalingService.sendUserSignal(targetId, hangupPayload);
+      }
     }
     handleCleanup();
   };
@@ -492,8 +678,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
    */
   const handleCleanup = () => {
     console.log('[CALL][CLEANUP] Cleaning up call resources');
-    if (callTimerRef.current) clearTimeout(callTimerRef.current);
-    if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+    if (callTimerRef.current) {
+      clearTimeout(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
+    if (disconnectGraceTimerRef.current) {
+      clearTimeout(disconnectGraceTimerRef.current);
+      disconnectGraceTimerRef.current = null;
+    }
 
     // Leave Call Room Channel
     if (callRoomChannelRef.current) {
@@ -517,13 +713,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
       webrtcRef.current = null;
     }
 
+    callSessionRef.current = null;
+    callStateRef.current = 'idle';
     setLocalStream(null);
     setRemoteStream(null);
     setCallSession(null);
     setCallState('idle');
     setIsMuted(false);
     setIsVideoOff(false);
-    pendingOfferRef.current = null;
+    resetCallNegotiationRefs();
   };
 
   return (
@@ -599,27 +797,32 @@ function CallOverlayModal({
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
-    if (remoteAudioRef.current && remoteStream) {
+    const audioEl = remoteAudioRef.current;
+    if (audioEl && remoteStream) {
       console.log('[CALL][AUDIO] Attaching remoteStream to remoteAudioRef. Audio tracks:', remoteStream.getAudioTracks().length);
-      remoteAudioRef.current.srcObject = remoteStream;
-      remoteAudioRef.current.muted = false;
-      remoteAudioRef.current.volume = 1.0;
-      remoteAudioRef.current
+      if (audioEl.srcObject !== remoteStream) {
+        audioEl.srcObject = remoteStream;
+      }
+      audioEl.muted = false;
+      audioEl.volume = 1.0;
+      audioEl
         .play()
         .then(() => console.log('[CALL][AUDIO] Remote audio element playback started successfully'))
         .catch(e => console.warn('[CALL][AUDIO] Remote audio autoplay error:', e));
     }
-  }, [remoteStream]);
+  }, [remoteStream, callState]);
 
-  const isIncoming = callSession && callSession.callee_id === currentUserId && callState === 'ringing';
-  const isOutgoing = callSession && callSession.caller_id === currentUserId && callState === 'ringing';
+  const isCallee = Boolean(callSession && callSession.callee_id === currentUserId);
+  const isIncoming = isCallee && callState === 'ringing';
+  const isOutgoing = Boolean(callSession && callSession.caller_id === currentUserId && callState === 'ringing');
   const isConnecting = callState === 'connecting';
   const isAccepted = callState === 'accepted';
   const isFailed = callState === 'failed';
 
-  const otherName = isIncoming
-    ? callSession.caller_name
+  const otherName = isCallee
+    ? callSession?.caller_name || 'Người thân'
     : callSession?.callee_name || 'Người thân';
+  const otherAvatar = isCallee ? callSession?.caller_avatar : callSession?.callee_avatar;
 
   return (
     <div className="fixed inset-0 z-[120] bg-[#14213D]/95 backdrop-blur-xl flex flex-col items-center justify-between p-4 md:p-6 text-white animate-fade-in select-none">
@@ -642,9 +845,9 @@ function CallOverlayModal({
         <div className="flex flex-col items-center text-center gap-6 py-6">
           <div className="relative">
             <div className="w-28 h-28 md:w-36 md:h-36 rounded-full bg-[#6AC9F0]/20 border-4 border-[#6AC9F0] flex items-center justify-center shadow-xl animate-pulse">
-              {callSession?.caller_avatar ? (
+              {otherAvatar ? (
                 <img
-                  src={callSession.caller_avatar}
+                  src={otherAvatar}
                   alt={otherName}
                   className="w-full h-full rounded-full object-cover"
                 />
