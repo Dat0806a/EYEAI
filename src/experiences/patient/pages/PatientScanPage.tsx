@@ -4,6 +4,7 @@ import { AppButton } from '../../../components/ui/AppButton';
 import { Upload, Camera, FileText, AlertCircle, Loader2 } from 'lucide-react';
 import { scanOcr } from '../../../services/patientService';
 import { OcrResultItem } from '../../../types/patient';
+import { useAgentRuntimeSync } from '../voice-agent/context/useAgentRuntimeSync';
 
 interface PatientScanPageProps {
   onBack: () => void;
@@ -16,6 +17,14 @@ export function PatientScanPage({ onBack, onOpenSettings, onScanComplete }: Pati
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Sync scan page state into Agent runtime store (no-ops in Default Mode)
+  useAgentRuntimeSync({
+    currentRoute: 'patient-scan',
+    uploadStatus: loading ? 'uploading' : 'idle',
+    ocrStatus: loading ? 'running' : 'idle',
+    errorStatus: error,
+  });
 
   const handleFileProcess = async (file: File | undefined | null) => {
     if (!file) return;

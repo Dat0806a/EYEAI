@@ -21,6 +21,11 @@ interface LiveCameraOverlayProps {
   mirrored?: boolean;
 }
 
+/**
+ * Thanh phan `LiveCameraOverlay`: Ve lop phu 60 khung hinh/giay len tren khung hinh camera.
+ * - Doc truc tiep toa do diem moc tho tu tham chieu cua `EyeTrackingProvider` de tranh ve lai giao dien React khong can thiet.
+ * - Hien thi khung bao khuon mat, duong vien hai mat va tam con nguoi giup nguoi dung can chinh goc nhin.
+ */
 export const LiveCameraOverlay = memo(function LiveCameraOverlay({
   className = '',
   videoElement,

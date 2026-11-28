@@ -1,6 +1,7 @@
 import React, { memo, useState, useEffect } from 'react';
 import { useEyeTrackingSettings, useEyeTrackingTelemetry } from './useEyeTracking';
 import { CameraPreview } from './CameraPreview';
+import { EyeFocusable } from './EyeFocusable';
 import { EyeAction, GazeDirection } from './types';
 import {
   ArrowLeft,
@@ -25,6 +26,7 @@ import {
   Eye,
   Minimize2,
   PhoneCall,
+  Sun,
 } from 'lucide-react';
 
 interface CameraHubProps {
@@ -33,12 +35,20 @@ interface CameraHubProps {
   onClose?: () => void;
 }
 
+/**
+ * Bang dieu khien trung tam Camera Hub khi mo rong tu thanh `GlobalEyeHUD`:
+ * - Hien thi `CameraPreview` kem lop ve luoi khuon mat, hai mat, mong mat va bo dem chop mat 0/3.
+ * - Cung cap nut "Can tam" (`reZeroCenter`), "Hieu chuan" (`start5PointCalibration`), "Ho tro thieu sang".
+ * - Hien thi 6 nut lenh cho phep bam thu nghiem thu cong (`triggerManualAction`), thanh thoi gian cho, cam bien do mo mat EAR va thong so ky thuat.
+ */
 export const CameraHub = memo(function CameraHub({
   className = '',
   compact = false,
   onClose,
 }: CameraHubProps) {
   const {
+    settings,
+    setLowLightFilterEnabled,
     calibration,
     start5PointCalibration,
     calibrationStage,
@@ -52,6 +62,11 @@ export const CameraHub = memo(function CameraHub({
     setOverlaySettings,
     triggerManualAction,
   } = useEyeTrackingSettings();
+
+  const isLowLightOn = Boolean(settings.lowLightFilterEnabled);
+  const handleToggleLowLight = () => {
+    setLowLightFilterEnabled(!isLowLightOn);
+  };
 
   const { trackingState } = useEyeTrackingTelemetry();
   const [showDebug, setShowDebug] = useState(false);
@@ -348,6 +363,39 @@ export const CameraHub = memo(function CameraHub({
             </div>
           </div>
         </div>
+
+        {/* LOW-LIGHT EXPOSURE ENHANCEMENT TOGGLE */}
+        <EyeFocusable
+          id="btn-camera-hub-low-light"
+          onSelect={handleToggleLowLight}
+          speakLabel={isLowLightOn ? 'Tắt hỗ trợ thiếu sáng' : 'Bật hỗ trợ thiếu sáng'}
+          className="w-full"
+        >
+          <button
+            type="button"
+            id="camera-hub-low-light-toggle"
+            aria-pressed={isLowLightOn}
+            className={`w-full px-3 py-2 rounded-xl border flex items-center justify-between gap-2 transition-all duration-150 cursor-pointer active:scale-[0.99] select-none ${
+              isLowLightOn
+                ? 'bg-amber-500/15 border-amber-400/60 text-amber-200 shadow-[0_0_14px_rgba(251,191,36,0.2)]'
+                : 'bg-slate-900/75 border-slate-800 text-slate-300 hover:border-slate-700'
+            }`}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <Sun className={`w-4 h-4 flex-shrink-0 ${isLowLightOn ? 'text-amber-400' : 'text-slate-400'}`} />
+              <span className="text-xs font-bold truncate">Hỗ trợ thiếu sáng</span>
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider border flex-shrink-0 ${
+                isLowLightOn
+                  ? 'bg-amber-400 text-slate-950 border-amber-300'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+            >
+              {isLowLightOn ? 'ON' : 'OFF'}
+            </span>
+          </button>
+        </EyeFocusable>
 
         {/* AREA B: GESTURE COMMAND INDICATORS (6 REQUIRED INTERACTIVE BADGES) */}
         <div>

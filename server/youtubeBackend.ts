@@ -66,7 +66,12 @@ function decodeHtmlEntities(str: string): string {
 }
 
 /**
- * Express handler for GET /api/entertainment/search
+ * Ham xu ly Express cho `/api/entertainment/search` (tim kiem Sach noi, Radio, Am nhac cho trang Giai tri).
+ *
+ * Ket noi khoa API: Doc `process.env.YOUTUBE_API_KEY` phia may chu de goi YouTube Data API v3 (`search.list`).
+ * Bao ve han muc mien phi:
+ * - Luu dem ket qua trong RAM 10 phut (`searchCache`).
+ * - Chong goi trung yeu cau dong thoi cho cung mot tu khoa (`pendingRequests`).
  */
 export async function handleEntertainmentSearch(req: express.Request, res: express.Response) {
   try {

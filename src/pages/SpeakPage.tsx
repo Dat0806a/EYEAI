@@ -72,6 +72,10 @@ export function SpeakPage({ onBack }: SpeakPageProps) {
     setIsSpeakingState(false);
   };
 
+  /**
+   * Phat giong noi bang loa thiet bi cho van ban da nhap.
+   * Chan phat neu dang trong cuoc goi WebRTC (`isCallActive`) hoac loa dang tat (`!settings.speakerEnabled`).
+   */
   const handleSpeakText = (text: string) => {
     if (!text.trim()) return;
 
@@ -97,6 +101,11 @@ export function SpeakPage({ onBack }: SpeakPageProps) {
     });
   };
 
+  /**
+   * Gui va phat thanh tieng cau noi vua nhap tren trang Giao tiep (`SpeakPage`).
+   * - Co chong gui trung lap bang `submittingRef`.
+   * - Chan neu dang trong cuoc goi thoai, luu tin nhan vao lich su va goi `handleSpeakText()` de doc tieng Viet.
+   */
   const handleSubmit = (textOverride?: string) => {
     const textToSend = (textOverride || draft).trim();
     if (!textToSend) return;

@@ -75,6 +75,11 @@ export function VirtualKeyboard({
     };
   }, [isOpen, setKeyboardOpen]);
 
+  /**
+   * Xu ly khi nguoi dung chon mot phim tren ban phim ao (bang mat hoac cham):
+   * - Cac phim chuyen che do (`TOGGLE_NUMBERS`, `TOGGLE_PHRASES`, `TOGGLE_ABC`) doi bo cuc ban phim noi bo.
+   * - Cac phim ky tu, mau cau, xoa, gui duoc day len ham goi lai `onKeyPress` cua trang cha.
+   */
   const handleKeyClick = (item: GridItem) => {
     if (item.value === 'TOGGLE_NUMBERS') {
       setLayoutMode('NUMBERS');

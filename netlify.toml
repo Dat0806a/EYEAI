@@ -5,7 +5,20 @@
 [functions]
   directory = "netlify/functions"
 
-# 1. API Patient Endpoints (Netlify Serverless Function)
+# 1. API Patient Autonomous Agent Endpoints (must precede /api/patient/*)
+[[redirects]]
+  from = "/api/patient/agent/*"
+  to = "/.netlify/functions/patient-agent"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/patient/agent"
+  to = "/.netlify/functions/patient-agent"
+  status = 200
+  force = true
+
+# 2. API Patient Endpoints (Netlify Serverless Function)
 [[redirects]]
   from = "/api/patient/*"
   to = "/.netlify/functions/patient"

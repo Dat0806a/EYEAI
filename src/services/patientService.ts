@@ -10,8 +10,97 @@ import { parseOcrText } from './patientOcrNormalizer';
 import { buildCompleteBundle, classifyResult } from './patientAnalysisService';
 import { GoogleGenAI } from '@google/genai';
 
-const LOCAL_STORAGE_KEY_REPORTS = 'eyetalk_patient_reports';
-const LOCAL_STORAGE_KEY_BUNDLES = 'eyetalk_patient_bundles';
+const LEGACY_STORAGE_KEY_REPORTS = 'eyetalk_patient_reports';
+const LEGACY_STORAGE_KEY_BUNDLES_PREFIX = 'eyetalk_patient_bundles';
+const SCOPED_STORAGE_PREFIX = 'eyetalk_patient_v2';
+
+/**
+ * Resolves the verified Supabase user ID for user-scoped patient storage isolation.
+ * Fails closed (returns null) if no authenticated user session is active.
+ */
+export async function resolvePatientUserId(): Promise<string | null> {
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData?.session?.user?.id) {
+      return sessionData.session.user.id;
+    }
+    const { data: userData } = await supabase.auth.getUser();
+    return userData?.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detects pre-existing un-namespaced legacy keys without mutating or exposing them.
+ */
+export function hasUnownedLegacyPatientStorage(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  try {
+    if (localStorage.getItem(LEGACY_STORAGE_KEY_REPORTS) !== null) return true;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(`${LEGACY_STORAGE_KEY_BUNDLES_PREFIX}_`)) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function getScopedReportsKey(userId: string): string {
+  return `${SCOPED_STORAGE_PREFIX}_${userId}_reports`;
+}
+
+function getScopedBundleKey(userId: string, reportId: string): string {
+  return `${SCOPED_STORAGE_PREFIX}_${userId}_bundles_${reportId}`;
+}
+
+function getLocalReports(userId: string | null): HistoryReport[] {
+  if (!userId) return [];
+  try {
+    const raw = localStorage.getItem(getScopedReportsKey(userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((r) => !r.user_id || r.user_id === userId);
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalReport(report: HistoryReport, userId: string | null) {
+  if (!userId) return;
+  try {
+    const scopedReport: HistoryReport = { ...report, user_id: userId };
+    const reports = getLocalReports(userId);
+    const filtered = reports.filter((r) => r.id !== scopedReport.id);
+    localStorage.setItem(getScopedReportsKey(userId), JSON.stringify([scopedReport, ...filtered]));
+  } catch {
+    // Ignore
+  }
+}
+
+function getLocalBundle(reportId: string, userId: string | null): AnalysisBundle | null {
+  if (!userId) return null;
+  try {
+    const raw = localStorage.getItem(getScopedBundleKey(userId, reportId));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalBundle(reportId: string, bundle: AnalysisBundle, userId: string | null) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(getScopedBundleKey(userId, reportId), JSON.stringify(bundle));
+  } catch {
+    // Ignore
+  }
+}
 
 const CLIENT_MODELS_TO_TRY = [
   'gemini-3.5-flash',
@@ -28,42 +117,6 @@ function getClientGeminiApiKey(): string {
     (typeof process !== 'undefined' ? (process.env?.GEMINI_API_KEY || process.env?.VITE_GEMINI_API_KEY) : '') ||
     ''
   ).trim();
-}
-
-function getLocalReports(): HistoryReport[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY_REPORTS);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveLocalReport(report: HistoryReport) {
-  try {
-    const reports = getLocalReports();
-    const filtered = reports.filter((r) => r.id !== report.id);
-    localStorage.setItem(LOCAL_STORAGE_KEY_REPORTS, JSON.stringify([report, ...filtered]));
-  } catch {
-    // Ignore
-  }
-}
-
-function getLocalBundle(reportId: string): AnalysisBundle | null {
-  try {
-    const raw = localStorage.getItem(`${LOCAL_STORAGE_KEY_BUNDLES}_${reportId}`);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveLocalBundle(reportId: string, bundle: AnalysisBundle) {
-  try {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY_BUNDLES}_${reportId}`, JSON.stringify(bundle));
-  } catch {
-    // Ignore
-  }
 }
 
 /**
@@ -359,15 +412,17 @@ export async function scanOcr(file: File): Promise<OcrScanResponse> {
     );
   }
 
-  // 5. Create and persist initial report metadata
+  // 5. Create and persist initial report metadata scoped to authenticated patient
+  const activeUserId = await resolvePatientUserId();
   const reportObj: HistoryReport = {
     id: reportId,
+    user_id: activeUserId ?? undefined,
     created_at: new Date().toISOString(),
     status: 'PROCESSED',
     source_type: file.type.includes('image') ? 'CAMERA' : 'UPLOAD',
     results_count: results.length,
   };
-  saveLocalReport(reportObj);
+  saveLocalReport(reportObj, activeUserId);
 
   // 6. Sync to Supabase if user is authenticated
   try {
@@ -571,23 +626,30 @@ export async function confirmAnalysis(
     bundle = buildCompleteBundle(reportId, confirmedResults, age);
   }
 
-  // 4. Save bundle locally
-  saveLocalBundle(reportId, bundle);
+  // 4. Save bundle locally scoped to authenticated patient
+  const activeUserId = await resolvePatientUserId();
+  saveLocalBundle(reportId, bundle, activeUserId);
 
   // 5. Update history report status
-  const reports = getLocalReports();
-  const index = reports.findIndex((r) => r.id === reportId);
-  if (index !== -1) {
-    reports[index].results_count = confirmedResults.length;
-    localStorage.setItem(LOCAL_STORAGE_KEY_REPORTS, JSON.stringify(reports));
-  } else {
-    saveLocalReport({
-      id: reportId,
-      created_at: new Date().toISOString(),
-      status: 'PROCESSED',
-      source_type: 'UPLOAD',
-      results_count: confirmedResults.length,
-    });
+  if (activeUserId) {
+    const reports = getLocalReports(activeUserId);
+    const index = reports.findIndex((r) => r.id === reportId);
+    if (index !== -1) {
+      reports[index].results_count = confirmedResults.length;
+      localStorage.setItem(getScopedReportsKey(activeUserId), JSON.stringify(reports));
+    } else {
+      saveLocalReport(
+        {
+          id: reportId,
+          user_id: activeUserId,
+          created_at: new Date().toISOString(),
+          status: 'PROCESSED',
+          source_type: 'UPLOAD',
+          results_count: confirmedResults.length,
+        },
+        activeUserId
+      );
+    }
   }
 
   // 6. Sync to Supabase with type-safe numeric value handling
@@ -635,35 +697,49 @@ export async function confirmAnalysis(
  * Get detail analysis bundle for a report
  */
 export async function getReportDetail(reportId: string): Promise<AnalysisBundle> {
-  // 1. Try local storage first
-  const local = getLocalBundle(reportId);
+  const activeUserId = await resolvePatientUserId();
+  if (!activeUserId) {
+    throw new Error('Phiên đăng nhập chưa xác thực. Vui lòng đăng nhập lại để xem kết quả.');
+  }
+
+  // 1. Try user-scoped local storage first
+  const local = getLocalBundle(reportId, activeUserId);
   if (local) return local;
 
-  // 2. Try fetching from Supabase
+  // 2. Try fetching from Supabase after verifying report ownership
   try {
-    const { data: results, error } = await supabase
-      .from('lab_results')
-      .select('*')
-      .eq('report_id', reportId);
+    const { data: ownReport } = await supabase
+      .from('lab_reports')
+      .select('id, user_id')
+      .eq('id', reportId)
+      .eq('user_id', activeUserId)
+      .maybeSingle();
 
-    if (!error && results && results.length > 0) {
-      const confirmed: ConfirmedLabResult[] = results.map((r) => {
-        const isQual = typeof r.explanation === 'string' && r.explanation.startsWith('[Định tính: ');
-        const qualVal = isQual ? r.explanation.replace('[Định tính: ', '').replace(']', '') : '';
-        return {
-          testCode: r.test_code,
-          testName: r.test_name,
-          value: isQual ? qualVal : Number(r.value),
-          valueType: isQual ? 'QUALITATIVE' : 'NUMERIC',
-          unit: r.unit,
-          referenceLow: r.reference_low ? Number(r.reference_low) : null,
-          referenceHigh: r.reference_high ? Number(r.reference_high) : null,
-          referenceText: r.reference_text,
-        };
-      });
-      const bundle = buildCompleteBundle(reportId, confirmed);
-      saveLocalBundle(reportId, bundle);
-      return bundle;
+    if (ownReport) {
+      const { data: results, error } = await supabase
+        .from('lab_results')
+        .select('*')
+        .eq('report_id', reportId);
+
+      if (!error && results && results.length > 0) {
+        const confirmed: ConfirmedLabResult[] = results.map((r) => {
+          const isQual = typeof r.explanation === 'string' && r.explanation.startsWith('[Định tính: ');
+          const qualVal = isQual ? r.explanation.replace('[Định tính: ', '').replace(']', '') : '';
+          return {
+            testCode: r.test_code,
+            testName: r.test_name,
+            value: isQual ? qualVal : Number(r.value),
+            valueType: isQual ? 'QUALITATIVE' : 'NUMERIC',
+            unit: r.unit,
+            referenceLow: r.reference_low ? Number(r.reference_low) : null,
+            referenceHigh: r.reference_high ? Number(r.reference_high) : null,
+            referenceText: r.reference_text,
+          };
+        });
+        const bundle = buildCompleteBundle(reportId, confirmed);
+        saveLocalBundle(reportId, bundle, activeUserId);
+        return bundle;
+      }
     }
   } catch {
     // Ignore
@@ -676,23 +752,26 @@ export async function getReportDetail(reportId: string): Promise<AnalysisBundle>
  * Get user's lab history list
  */
 export async function getHistory(): Promise<HistoryReport[]> {
-  try {
-    const { data: userData } = await supabase.auth.getUser();
-    if (userData?.user) {
-      const { data, error } = await supabase
-        .from('lab_reports')
-        .select('*')
-        .order('created_at', { ascending: false });
+  const activeUserId = await resolvePatientUserId();
+  if (!activeUserId) {
+    return [];
+  }
 
-      if (!error && data && data.length > 0) {
-        return data as HistoryReport[];
-      }
+  try {
+    const { data, error } = await supabase
+      .from('lab_reports')
+      .select('*')
+      .eq('user_id', activeUserId)
+      .order('created_at', { ascending: false });
+
+    if (!error && data && data.length > 0) {
+      return data as HistoryReport[];
     }
   } catch {
     // Ignore
   }
 
-  return getLocalReports();
+  return getLocalReports(activeUserId);
 }
 
 /**

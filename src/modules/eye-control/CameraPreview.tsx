@@ -10,15 +10,23 @@ interface CameraPreviewProps {
   showStatusPill?: boolean;
 }
 
+/**
+ * Thanh phan `CameraPreview`: Hien thi khung hinh webcam truc tiep cho nguoi suy giam.
+ * - Dong bo luong video vao the `<video>` va ho tro lat guong (`mirrored`).
+ * - Neu bat che do thieu sang, ve khung anh da tang cuong do sang gamma thay cho video goc.
+ * - Tich hop `LiveCameraOverlay` de ve luoi diem mat MediaPipe theo thoi gian thuc.
+ */
 export const CameraPreview = memo(function CameraPreview({
   className = '',
   mirrored = true,
   showOverlay = true,
   showStatusPill = true,
 }: CameraPreviewProps) {
-  const { cameraStream } = useEyeTrackingSettings();
+  const { cameraStream, settings, processedCanvasRef } = useEyeTrackingSettings();
   const { trackingState } = useEyeTrackingTelemetry();
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const previewCtxRef = useRef<CanvasRenderingContext2D | null>(null);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -44,6 +52,71 @@ export const CameraPreview = memo(function CameraPreview({
   }, [cameraStream, trackingState.cameraActive]);
 
   const { cameraActive, cameraError } = trackingState;
+  const isLowLightPreviewActive = Boolean(settings.lowLightFilterEnabled && cameraActive);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!isLowLightPreviewActive) {
+      previewCtxRef.current = null;
+      const canvas = previewCanvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.style.opacity = '0';
+      }
+      if (video) {
+        video.style.opacity = '1';
+      }
+      return;
+    }
+
+    let animId = 0;
+    let active = true;
+
+    const syncProcessedPreview = () => {
+      if (!active) return;
+      const targetCanvas = previewCanvasRef.current;
+      const sourceCanvas = processedCanvasRef.current;
+      const vid = videoRef.current;
+
+      if (targetCanvas && sourceCanvas && sourceCanvas.width > 0 && sourceCanvas.height > 0) {
+        if (targetCanvas.width !== sourceCanvas.width || targetCanvas.height !== sourceCanvas.height) {
+          targetCanvas.width = sourceCanvas.width;
+          targetCanvas.height = sourceCanvas.height;
+          previewCtxRef.current = targetCanvas.getContext('2d');
+        }
+        const ctx = previewCtxRef.current ?? targetCanvas.getContext('2d');
+        if (ctx) {
+          previewCtxRef.current = ctx;
+          ctx.drawImage(sourceCanvas, 0, 0);
+          targetCanvas.style.opacity = '1';
+          if (vid) {
+            vid.style.opacity = '0';
+          }
+        }
+      } else {
+        if (targetCanvas) {
+          targetCanvas.style.opacity = '0';
+        }
+        if (vid) {
+          vid.style.opacity = '1';
+        }
+      }
+
+      animId = requestAnimationFrame(syncProcessedPreview);
+    };
+
+    // Paint immediately if a processed frame is already available, then keep syncing at rAF
+    syncProcessedPreview();
+    return () => {
+      active = false;
+      cancelAnimationFrame(animId);
+      previewCtxRef.current = null;
+      if (videoRef.current) {
+        videoRef.current.style.opacity = '1';
+      }
+    };
+  }, [isLowLightPreviewActive, processedCanvasRef]);
 
   return (
     <div className={`relative overflow-hidden bg-slate-900 ${className}`}>
@@ -54,6 +127,14 @@ export const CameraPreview = memo(function CameraPreview({
         playsInline
         className={`w-full h-full object-cover ${mirrored ? 'transform -scale-x-100' : ''}`}
       />
+
+      {isLowLightPreviewActive && (
+        <canvas
+          ref={previewCanvasRef}
+          className={`absolute inset-0 w-full h-full object-cover pointer-events-none opacity-0 ${mirrored ? 'transform -scale-x-100' : ''}`}
+          aria-hidden="true"
+        />
+      )}
 
       {/* Real-time 3D Face Mesh & Iris Tracking Canvas Overlay */}
       {cameraActive && showOverlay && (
@@ -84,4 +165,3 @@ export const CameraPreview = memo(function CameraPreview({
     </div>
   );
 });
-

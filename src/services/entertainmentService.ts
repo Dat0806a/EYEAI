@@ -36,6 +36,10 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&gt;/g, '>');
 }
 
+/**
+ * Nhanh du phong goi truc tiep YouTube Data API v3 tu trinh duyet khi may chu `/api/entertainment/search`
+ * khong kha dung (vi du tren may chu tinh). Doc `VITE_YOUTUBE_API_KEY` hoac `YOUTUBE_API_KEY`.
+ */
 async function searchYouTubeDirect(query: string, mode: EntertainmentMode): Promise<EntertainmentSearchResponse> {
   const apiKey = 
     import.meta.env.VITE_YOUTUBE_API_KEY || 

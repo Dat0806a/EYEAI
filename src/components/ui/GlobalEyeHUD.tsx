@@ -11,6 +11,12 @@ export interface GlobalEyeHUDProps {
   currentRoute?: string;
 }
 
+/**
+ * Thanh trang thai dieu khien mat toan cuc (chi hien thi cho tai khoan `impaired`, an o `patient-*` va man hinh dang nhap).
+ * Ho tro 2 che do hien thi tu dong (`variant="auto"`):
+ * - `keyboard-bar`: Thanh ngang mong gan duoi tieu de khi o trang `chat`, `ai` hoac khi mo `VirtualKeyboard`.
+ * - `floating`: Nut noi nho o goc duoi-trai cac trang con lai (cho phep mo rong `CameraHub` hoac bat lai camera).
+ */
 export const GlobalEyeHUD = memo(function GlobalEyeHUD({
   variant = 'auto',
   currentRoute,

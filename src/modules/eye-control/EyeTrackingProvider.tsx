@@ -9,6 +9,7 @@ import {
   OverlayDisplaySettings,
 } from './types';
 import { analyzeEyes, Point } from './eyeTracker';
+import { LowLightExposureProcessor, extractFaceRoiFromLandmarks } from './lowLightFilter';
 import { speakVietnamese, updateSpeechSettings, recoverAudioSession } from '../../utils/speech';
 
 export interface EyeTrackingSettingsContextType {
@@ -19,6 +20,7 @@ export interface EyeTrackingSettingsContextType {
   cameraStream: MediaStream | null;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  processedCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   isKeyboardOpen: boolean;
   setKeyboardOpen: (open: boolean) => void;
   setEyeControlEnabled: (enabled: boolean) => void;
@@ -27,6 +29,7 @@ export interface EyeTrackingSettingsContextType {
   setSpeakerEnabled: (enabled: boolean) => void;
   setSpeechVolume: (volume: number) => void;
   setSpeechRate: (rate: number) => void;
+  setLowLightFilterEnabled: (enabled: boolean) => void;
   toggleCamera: () => Promise<void>;
   startCalibration: () => void;
   start5PointCalibration: () => void;
@@ -58,9 +61,22 @@ const TELEMETRY_THROTTLE_MS = 65;
 // Cooldown between eye operations (2.5 seconds)
 const ACTION_COOLDOWN_MS = 2500;
 
+/**
+ * Bo cung cap ngu canh trung tam cua phan he dieu khien bang mat (che do Nguoi suy giam).
+ * Nhiem vu:
+ * 1. Nap thu vien MediaPipe FaceMesh tu CDN va quan ly luong webcam (`getUserMedia` 640x480).
+ * 2. Tien xu ly thieu sang tuy chon (`LowLightExposureProcessor`) truoc khi dua vao AI nhan dien.
+ * 3. Chay may trang thai nhan dien cu chi mat:
+ *    - Dem so lan chop mat (cua so 700ms): 1 chop = XUONG, 2 chop = CHON, 3 chop = KHAN CAP.
+ *    - Phan loai huong liec mat: Liec TRAI/PHAI/LEN (tat XUONG), lam muot EMA 0.45, giu 220ms, nha ve tam 140ms.
+ * 4. Hieu chuan 5 huong (`start5PointCalibration`), can tam nhanh (`reZeroCenter`) va che do mo phong.
+ * 5. Tach doi 2 ngu canh (`SettingsContext` va `TelemetryContext`) de tranh ve lai toan bo giao dien o 15 khung hinh/giay.
+ */
 export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const processedCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lowLightProcessorRef = useRef<LowLightExposureProcessor | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const faceMeshRef = useRef<any>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -118,6 +134,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       speakerEnabled: defaultSpeakerEnabled,
       speechVolume: defaultSpeechVolume,
       speechRate: defaultSpeechRate,
+      lowLightFilterEnabled: false,
     };
 
     if (saved) {
@@ -167,6 +184,18 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       speechRate: settings.speechRate,
     });
   }, [settings]);
+
+  const lowLightFilterEnabledRef = useRef<boolean>(settings.lowLightFilterEnabled);
+  useEffect(() => {
+    lowLightFilterEnabledRef.current = settings.lowLightFilterEnabled;
+    if (!settings.lowLightFilterEnabled) {
+      lowLightProcessorRef.current?.reset();
+      processedCanvasRef.current = null;
+      if (typeof window !== 'undefined') {
+        delete (window as any).__eyeai_lowlight_stats;
+      }
+    }
+  }, [settings.lowLightFilterEnabled]);
 
   // Calibration state with 5 directions
   const [calibration, setCalibration] = useState<EyeCalibrationData>(() => {
@@ -271,6 +300,10 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
 
   const gestureCallbacksRef = useRef<Array<(action: EyeAction) => boolean | void>>([]);
 
+  /**
+   * Dang ky callback nhan lenh cu chi mat (vi du EyeNavigationProvider).
+   * Tra ve ham cleanup de go bo khi component unmount.
+   */
   const registerGestureCallback = useCallback((cb: (action: EyeAction) => boolean | void) => {
     gestureCallbacksRef.current.push(cb);
     return () => {
@@ -278,6 +311,12 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  /**
+   * Phat lenh dieu khien (`EyeAction`) toi tat ca subscriber da dang ky.
+   * - Xac dinh `executed = true` neu it nhat 1 subscriber xu ly thanh cong (khong dung bien).
+   * - Neu bat `soundFeedback`, phat am thanh tieng Viet tuong ung hoac bao dung bien.
+   * - Neu la `EMERGENCY`, phat them CustomEvent `eyeai:emergency` de mo ngay trang SOS.
+   */
   const dispatchAction = useCallback((action: EyeAction): boolean => {
     if (action === 'NONE') return false;
 
@@ -441,7 +480,16 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, []);
 
-  // Process face mesh frame results at high frequency (30 FPS)
+  /**
+   * Ham xu ly chinh o tan so camera (~30 khung hinh/giay) moi khi MediaPipe FaceMesh tra ve 478 diem moc:
+   * - Luu toa do tho vao `window.__eyeai_latest_landmarks` de `LiveCameraOverlay` ve luoi 60 khung hinh/giay.
+   * - Neu mat khuon mat qua 60 khung hinh (~2 giay): dat lai qua trinh khoi dong can tam tu dong (`initFramesCount = 0`).
+   * - Goi `analyzeEyes(landmarks)` de tinh do mo mat `EAR` va toa do liec theo duong noi khoe mat.
+   * - Uu tien 1 (May trang thai dem chop mat trong 700ms): 1 chop = XUONG, 2 chop = CHON, 3 chop = KHAN CAP.
+   * - Uu tien 2 (May trang thai phan loai huong liec): Khoi dong 35 khung hinh -> Bu troi tam -> Cong an toan (`isGazeAllowed`)
+   *   -> Lam muot EMA 0.45 -> Phan loai TRAI/PHAI/LEN (tat XUONG) voi vung tre 0.55 -> Nha ve tam 140ms -> Giu nhin 220ms.
+   * - Gui `trackingState` len giao dien React co dieu tiet tan suat (65ms binh thuong, 40ms khi dang dem chop).
+   */
   const processFaceMeshResults = useCallback((results: any) => {
     const now = performance.now();
     const elapsed = Math.min(100, Math.max(1, now - lastFrameTime.current));
@@ -1446,7 +1494,12 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     };
   }, [settings.simulatorMode, dispatchAction]);
 
-  // Render loop using single FaceMesh instance with Concurrency Lock (Backpressure)
+  /**
+   * Khoi chay vong lap xu ly khung hinh MediaPipe FaceMesh qua `requestAnimationFrame`:
+   * - Khoi tao mot thuc the duy nhat trong `faceMeshRef.current` (bat che do `refineLandmarks: true` de lay 478 diem moc).
+   * - Dung khoa `isProcessingRef` de chong gui chong cheo khung hinh khi may dang ban suy luan.
+   * - Neu bat `lowLightFilterEnabled`, tien xu ly khung hinh qua `LowLightExposureProcessor` (neu loi thi dung video goc).
+   */
   const startTrackingLoop = useCallback(() => {
     if (!(window as any).FaceMesh) return;
 
@@ -1471,7 +1524,30 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       if (video && video.readyState >= 2 && !isProcessingRef.current && faceMeshRef.current) {
         isProcessingRef.current = true;
         try {
-          await faceMeshRef.current.send({ image: video });
+          let frameSource: HTMLVideoElement | HTMLCanvasElement = video;
+          if (lowLightFilterEnabledRef.current) {
+            try {
+              if (!lowLightProcessorRef.current) {
+                lowLightProcessorRef.current = new LowLightExposureProcessor();
+              }
+              const faceRoi = extractFaceRoiFromLandmarks((window as any).__eyeai_latest_landmarks);
+              const processed = lowLightProcessorRef.current.processFrame(video, faceRoi);
+              if (processed) {
+                processedCanvasRef.current = processed;
+                frameSource = processed;
+                (window as any).__eyeai_lowlight_stats = lowLightProcessorRef.current.getState();
+              } else {
+                processedCanvasRef.current = null;
+              }
+            } catch (filterErr) {
+              console.warn('[LowLightFilter] Safe fallback to raw video frame:', filterErr);
+              processedCanvasRef.current = null;
+              frameSource = video;
+            }
+          } else {
+            processedCanvasRef.current = null;
+          }
+          await faceMeshRef.current.send({ image: frameSource });
         } catch (e) {
           console.error('[FaceMesh send error]:', e);
         } finally {
@@ -1485,12 +1561,19 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     animationFrameRef.current = requestAnimationFrame(render);
   }, [processFaceMeshResults]);
 
+  /**
+   * Dung vong lap requestAnimationFrame cua MediaPipe FaceMesh.
+   * - Huy animationFrameRef hien tai de ngung doc frame tu camera.
+   * - Dat trang thai dang chay tracking ve false.
+   */
   const stopTrackingLoop = useCallback(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
     isProcessingRef.current = false;
+    lowLightProcessorRef.current?.reset();
+    processedCanvasRef.current = null;
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach(track => {
         track.stop();
@@ -1520,6 +1603,13 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     recoverAudioSession();
   }, []);
 
+  /**
+   * Khoi tao va bat camera qua WebRTC `navigator.mediaDevices.getUserMedia`.
+   * - Kiem tra ngu canh bao mat (HTTPS hoac localhost) vi trinh duyet chan camera tren HTTP thuong.
+   * - Ap dung do phan giai uu tien 640x480 va toc do 30 khung hinh/giay de toi uu hieu nang MediaPipe.
+   * - Tu dong thu lai voi cau hinh toi gian `{ video: true }` neu thiet bi bao loi gioi han phan cung.
+   * - Gan luong video vao `videoRef` va bat dau vong lap theo doi mat sau khi du lieu hinh anh san sang.
+   */
   const startCamera = useCallback(async () => {
     const isSec = typeof window !== 'undefined' ? window.isSecureContext : false;
     const hasMediaDevices = typeof navigator !== 'undefined' ? !!navigator.mediaDevices : false;
@@ -1649,6 +1739,9 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return () => {
       stopTrackingLoop();
+      lowLightProcessorRef.current?.dispose();
+      lowLightProcessorRef.current = null;
+      processedCanvasRef.current = null;
     };
   }, [stopTrackingLoop]);
 
@@ -1692,6 +1785,11 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     speakVietnamese('Đã đặt lại hiệu chỉnh');
   }, []);
 
+  /**
+   * Dat lai tam nhin trung tinh ngay lap tuc theo tu the mat hien tai.
+   * - Lay mau `irisRatio` va `gazeRatio` hien thoi tu `latestMetricsRef` lam goc toa do trung tam moi.
+   * - Giup nguoi dung bu sai lech neu thay doi tu the ngoi hoac goc dat camera.
+   */
   const reZeroCenter = useCallback(() => {
     const currentMetrics = latestMetricsRef.current;
     if (currentMetrics && currentMetrics.confidence >= 0.3) {
@@ -1734,6 +1832,12 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     speakVietnamese('Đã căn tâm');
   }, []);
 
+  /**
+   * Chay quy trinh hieu chuan 5 diem (giua, trai, phai, tren, duoi).
+   * - Huong dan nguoi dung nhin lan luot tung muc tieu va ghi nhan gia tri `irisRatio` cung `gazeRatio` tho.
+   * - Tinh nguong hieu chuan ca nhan hoa (giua, trai, phai, tren, duoi) va luu vao `calibrationProfileRef` cung `localStorage`.
+   * - Cho phep huy giua chung bang `calibrationCancelRef` neu nguoi dung dong hop thoai hoac bam huy.
+   */
   const start5PointCalibration = useCallback(async () => {
     calibrationCancelRef.current = false;
     setCalibrationStage('countdown');
@@ -1947,6 +2051,18 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     setSettings(prev => ({ ...prev, speechRate: clamped }));
   }, []);
 
+  const setLowLightFilterEnabled = useCallback((enabled: boolean) => {
+    lowLightFilterEnabledRef.current = enabled;
+    if (!enabled) {
+      lowLightProcessorRef.current?.reset();
+      processedCanvasRef.current = null;
+      if (typeof window !== 'undefined') {
+        delete (window as any).__eyeai_lowlight_stats;
+      }
+    }
+    setSettings(prev => ({ ...prev, lowLightFilterEnabled: enabled }));
+  }, []);
+
   const [isKeyboardOpen, setKeyboardOpen] = useState(false);
 
   // Stable Memoized Settings Context Value
@@ -1958,6 +2074,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     cameraStream,
     videoRef,
     canvasRef,
+    processedCanvasRef,
     isKeyboardOpen,
     setKeyboardOpen,
     setEyeControlEnabled,
@@ -1966,6 +2083,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     setSpeakerEnabled,
     setSpeechVolume,
     setSpeechRate,
+    setLowLightFilterEnabled,
     toggleCamera,
     startCalibration,
     start5PointCalibration,
@@ -2002,6 +2120,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     setSpeakerEnabled,
     setSpeechVolume,
     setSpeechRate,
+    setLowLightFilterEnabled,
     toggleCamera,
     startCalibration,
     start5PointCalibration,

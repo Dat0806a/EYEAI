@@ -51,7 +51,10 @@ export const EyeFocusable = memo(function EyeFocusable({
     speakLabelRef.current = speakLabel;
   }, [speakLabel]);
 
-  // Extract clear voice text from element or props
+  /**
+   * Rut trich van ban tieng Viet ngan gon de doc giong noi khi phan tu nhan tieu diem hoac duoc chon.
+   * Thu tu uu tien: thuoc tinh `speakLabel` -> `aria-label` -> `title` -> dong dau tien cua noi dung chu (bo bieu tuong cam xuc, cat toi da 40 ky tu).
+   */
   const getVoiceText = useCallback((): string => {
     if (speakLabelRef.current) return speakLabelRef.current;
     if (!elementRef.current) return '';
@@ -83,6 +86,10 @@ export const EyeFocusable = memo(function EyeFocusable({
 
   const lastSelectTimeRef = useRef<number>(0);
 
+  /**
+   * Xu ly kich hoat phan tu khi nguoi dung chop mat 2 lan (`SELECT`), nhan Enter/Space hoac cham truc tiep.
+   * Co chong bam nham 350ms (`lastSelectTimeRef`), hieu ung nhay sang 180ms, doc giong noi "Da chon ..." va goi `onSelect`.
+   */
   const handleSelect = useCallback((e?: React.SyntheticEvent) => {
     if (e && typeof e.stopPropagation === 'function') {
       e.stopPropagation();

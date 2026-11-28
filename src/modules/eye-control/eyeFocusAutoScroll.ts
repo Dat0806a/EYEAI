@@ -127,6 +127,15 @@ export function findScrollContainer(element: HTMLElement): HTMLElement | null {
  * - If element is obscured or near viewport edges -> smooth scroll to bring into safe zone.
  * - Respects sticky headers, Camera HUD, Virtual Keyboard height, and nested scroll containers.
  */
+/**
+ * Ham cot loi tu dong cuon trang hoac khung cuon long nhau de phan tu dang duoc chon bang mat
+ * luon nam tron trong vung hien thi an toan, khong bi che khuat.
+ *
+ * Quy tac:
+ * - Neu phan tu nam trong ban phim ao (`#smartphone-virtual-keyboard`) -> KHONG cuon trang.
+ * - Tinh chieu cao vung bi che phia tren (`header`, `KeyboardHudSlot`) va phia duoi (`VirtualKeyboard`).
+ * - Cong dem vien phat sang `FOCUS_RING_BUFFER = 18px` de khung xanh khong bi cat mep.
+ */
 export function ensureEyeFocusVisible(
   focusId: string | null,
   nodesMap?: Map<string, EyeFocusNode>,

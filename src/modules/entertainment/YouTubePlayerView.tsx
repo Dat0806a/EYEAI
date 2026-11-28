@@ -132,6 +132,10 @@ export function YouTubePlayerView({ item, onBack }: YouTubePlayerViewProps) {
     }
   };
 
+  /**
+   * Bat hoac tat phat video YouTube dong thoi qua `YT.Player` va phuong an du phong gui tin hieu `postMessage` toi iframe,
+   * kem phan hoi giong noi tieng Viet cho nguoi suy giam.
+   */
   const handleTogglePlayPause = () => {
     if (isPlaying) {
       if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {

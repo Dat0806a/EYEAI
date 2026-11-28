@@ -1,5 +1,7 @@
 // Netlify Function for Vietnamese TTS Audio Proxy
 // Supports both modern Netlify V2 (Web Standards Request/Response) and V1 (AWS Lambda)
+// Bo trung chuyen am thanh tieng Viet (`audio/mpeg`) tu Google Translate TTS cho trinh duyet thieu giong vi-VN ban dia (nhu Chrome tren may tinh).
+// Khong yeu cau khoa API tra phi; gioi han toi da 250 ky tu moi luot goi va luu dem 7 ngay qua tieu de `Cache-Control`.
 
 export default async function (req: Request) {
   const url = new URL(req.url);

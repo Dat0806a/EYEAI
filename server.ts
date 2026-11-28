@@ -5,6 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { handleEntertainmentSearch } from "./server/youtubeBackend";
 import { createPatientRouter } from "./server/patientBackend";
+import { createPatientAgentRouter } from "./server/patientAgentBackend";
 
 dotenv.config();
 
@@ -19,6 +20,7 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Doc GEMINI_API_KEY tu file .env / bien moi truong server de khoi tao GoogleGenAI SDK (khong lo key ra frontend)
   const apiKey = process.env.GEMINI_API_KEY;
 
   let ai: GoogleGenAI | null = null;
@@ -41,7 +43,10 @@ async function startServer() {
     "Nếu người dùng cần hỗ trợ khẩn cấp hoặc cấp cứu, hãy gợi ý họ sử dụng tính năng SOS trên màn hình chính của LUCKY DREAM. " +
     "Tránh viết các đoạn quá dài, danh sách dài dòng hoặc bảng biểu phức tạp trừ khi người dùng yêu cầu chi tiết.";
 
-  // Shared Gemini chat handler function
+  /**
+   * Ham xu ly Express dung chung cho `POST /api/ai/chat` va `POST /api/gemini/chat`.
+   * Nhan cau hoi kem lich su hoi thoai (toi da 15 luot gan nhat) va goi Gemini qua `GEMINI_API_KEY` phia may chu.
+   */
   const handleAiChat = async (req: express.Request, res: express.Response) => {
     try {
       if (!apiKey || !ai) {
@@ -145,6 +150,8 @@ async function startServer() {
   // Backend Endpoints for AI Chat
   app.post("/api/ai/chat", handleAiChat);
   app.post("/api/gemini/chat", handleAiChat);
+  // Dedicated Isolated Router for Patient Autonomous Voice Agent
+  app.use("/api/patient/agent", createPatientAgentRouter({ ai, apiKey }));
   // Dedicated Isolated Router for Patient Module (OCR Vision + Dynamic Lab Analysis + Health Chat)
   app.use("/api/patient", createPatientRouter(ai, apiKey));
 
@@ -152,7 +159,7 @@ async function startServer() {
   app.get("/api/entertainment/search", handleEntertainmentSearch);
   app.post("/api/entertainment/search", handleEntertainmentSearch);
 
-  // Backend Endpoint for Vietnamese TTS Audio (Google Translate TTS proxy)
+  // Endpoint proxy TTS tieng Viet (chuyen tiep Google Translate TTS) cho trinh duyet khong co giong ban dia nhu Chrome Desktop
   app.get("/api/tts", async (req, res) => {
     try {
       const text = (req.query.text as string || "").trim();

@@ -33,6 +33,13 @@ const SYSTEM_INSTRUCTION =
   "Nếu người dùng cần hỗ trợ khẩn cấp hoặc cấp cứu, hãy gợi ý họ sử dụng tính năng SOS trên màn hình chính của LUCKY DREAM. " +
   "Tránh viết các đoạn quá dài, danh sách dài dòng hoặc bảng biểu phức tạp trừ khi người dùng yêu cầu chi tiết.";
 
+/**
+ * Ham du phong goi truc tiep Google Gemini API tu trinh duyet khi may chu trung chuyen (`/api/ai/chat`) khong kha dung
+ * (vi du khi chay tren may chu tinh khong co may chu Node/Netlify).
+ *
+ * Ket noi khoa API: Doc lan luot `VITE_GEMINI_API_KEY` -> `GEMINI_API_KEY` -> `process.env`.
+ * Chien luoc goi: Thu qua bo cong cu `@google/genai` theo danh sach mo hinh uu tien, neu loi se chuyen sang goi HTTP REST v1beta.
+ */
 async function fetchDirectGemini(textToSend: string, history: any[], signal: AbortSignal): Promise<string> {
   const apiKey = (
     import.meta.env.VITE_GEMINI_API_KEY || 
@@ -166,6 +173,12 @@ export function AiPage({ onBack }: AiPageProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isAiLoading, errorMsg]);
 
+  /**
+   * Gui tin nhan toi tro ly AI va phat giong noi cau tra loi:
+   * 1. Cap nhat giao dien tin nhan nguoi dung, chuyen `Avatar3D` sang trang thai `THINKING`, dat gioi han cho 15 giay (`AbortController`).
+   * 2. Goi `POST /api/ai/chat` (may chu Express hoac Netlify). Neu loi, tu dong chuyen sang goi truc tiep `fetchDirectGemini`.
+   * 3. Neu khong dang trong cuoc goi (`!isCallActive`), chuyen Avatar sang `SPEAKING` va doc cau tra loi bang giong noi tieng Viet.
+   */
   const handleSend = async (textOverride?: string) => {
     const textToSend = (textOverride || draft).trim();
     if (!textToSend || isAiLoading) return;

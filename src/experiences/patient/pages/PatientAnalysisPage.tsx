@@ -17,6 +17,8 @@ import { AnalysisBundle, MealPlanItem, ExercisePlanItem } from '../../../types/p
 import { getReportDetail } from '../../../services/patientService';
 import { VerifiedMedia } from '../components/VerifiedMedia';
 import { PatientChatWidget } from '../components/PatientChatWidget';
+import { usePatientMode } from '../mode/PatientModeProvider';
+import { useAgentRuntimeSync } from '../voice-agent/context/useAgentRuntimeSync';
 
 interface PatientAnalysisPageProps {
   reportId: string;
@@ -47,10 +49,36 @@ export function PatientAnalysisPage({
   onBack,
   onOpenSettings,
 }: PatientAnalysisPageProps) {
+  const { mode } = usePatientMode();
   const [bundle, setBundle] = useState<AnalysisBundle | null>(initialBundle || null);
   const [tab, setTab] = useState<'analysis' | 'meal' | 'exercise'>(initialTab);
   const [loading, setLoading] = useState(!initialBundle);
   const [error, setError] = useState<string | null>(null);
+
+  // Sync analysis page state into Agent runtime store (no-ops in Default Mode)
+  useAgentRuntimeSync({
+    currentRoute: 'patient-analysis',
+    activeReportId: reportId || null,
+    currentResultTab: tab,
+    analysisStatus: loading ? 'running' : bundle ? 'ready' : 'idle',
+    reportSummary: bundle?.analysis?.overallSummary || null,
+    labHighlights: (bundle?.analysis?.results || []).map((r) => ({
+      testCode: r.testCode,
+      testName: r.testName,
+      value: r.value,
+      unit: r.unit,
+      status: r.status,
+      referenceText: r.referenceText || null,
+    })),
+    mealTitles: (bundle?.mealPlan?.items || []).map((m) => m.name),
+    exerciseTitles: (bundle?.exercisePlan?.items || []).map((e) => e.name),
+    recommendationCounts: {
+      results: bundle?.analysis?.results?.length || 0,
+      meals: bundle?.mealPlan?.items?.length || 0,
+      exercises: bundle?.exercisePlan?.items?.length || 0,
+    },
+    errorStatus: error,
+  });
 
   useEffect(() => {
     if (initialBundle) {
@@ -256,6 +284,8 @@ export function PatientAnalysisPage({
             {bundle.mealPlan.items.map((meal, idx) => (
               <div
                 key={idx}
+                role="listitem"
+                aria-label={`Thực đơn #${idx + 1}: ${meal.name}`}
                 className="bg-white rounded-[24px] p-5 border-2 border-[#14213D]/10 shadow-xs flex flex-col gap-3"
               >
                 <div className="flex items-center justify-between">
@@ -305,6 +335,8 @@ export function PatientAnalysisPage({
             {bundle.exercisePlan.items.map((ex, idx) => (
               <div
                 key={idx}
+                role="listitem"
+                aria-label={`Bài tập #${idx + 1}: ${ex.name}`}
                 className="bg-white rounded-[24px] p-5 border-2 border-[#14213D]/10 shadow-xs flex flex-col gap-3"
               >
                 <div className="flex items-center justify-between gap-2">
@@ -333,11 +365,13 @@ export function PatientAnalysisPage({
         )}
       </main>
 
-      {/* Floating Chatbot Widget with context summary and lab results */}
-      <PatientChatWidget
-        reportSummary={bundle?.analysis?.overallSummary}
-        labResults={bundle?.analysis?.results}
-      />
+      {/* Floating Chatbot Widget with context summary and lab results (Default Mode only) */}
+      {mode !== 'agent' && (
+        <PatientChatWidget
+          reportSummary={bundle?.analysis?.overallSummary}
+          labResults={bundle?.analysis?.results}
+        />
+      )}
     </div>
   );
 }

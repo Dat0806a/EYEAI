@@ -84,6 +84,7 @@ export interface EyeControlSettings {
   speakerEnabled: boolean;
   speechVolume: number;
   speechRate: number;
+  lowLightFilterEnabled: boolean;
 }
 
 export interface EyeFocusNode {

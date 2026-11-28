@@ -112,6 +112,10 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
     setShowTypeConfirmModal(true);
   };
 
+  /**
+   * Xac nhan chuyen doi loai tai khoan giua `impaired` (Nguoi suy giam) va `patient` (Benh nhan).
+   * Neu chuyen sang `patient`, tu dong tat che do dieu khien bang mat (`setEyeControlEnabled(false)`).
+   */
   const handleConfirmAccountTypeChange = async () => {
     if (!pendingAccountType) return;
     setUpdatingType(true);

@@ -4,6 +4,7 @@ import { AppButton } from '../../../components/ui/AppButton';
 import { History, FileText, ArrowRight, Camera, Loader2 } from 'lucide-react';
 import { getHistory } from '../../../services/patientService';
 import { HistoryReport } from '../../../types/patient';
+import { useAgentRuntimeSync } from '../voice-agent/context/useAgentRuntimeSync';
 
 interface PatientHistoryPageProps {
   onBack: () => void;
@@ -26,6 +27,12 @@ export function PatientHistoryPage({
       .then(setReports)
       .finally(() => setLoading(false));
   }, []);
+
+  // Sync history page state into Agent runtime store (no-ops in Default Mode)
+  useAgentRuntimeSync({
+    currentRoute: 'patient-history',
+    recentReportsCount: reports.length,
+  });
 
   return (
     <div className="min-h-screen bg-transparent text-[#14213D] flex flex-col pb-28">
@@ -86,10 +93,12 @@ export function PatientHistoryPage({
               </AppButton>
             </div>
           ) : (
-            <div className="flex flex-col gap-3">
-              {reports.map((r) => (
+            <div className="flex flex-col gap-3" role="list" aria-label="Danh sách lịch sử xét nghiệm">
+              {reports.map((r, idx) => (
                 <button
                   key={r.id}
+                  role="listitem"
+                  aria-label={`Phiếu xét nghiệm #${idx + 1}`}
                   onClick={() => onSelectReport(r.id)}
                   className="p-4 rounded-[20px] border-2 border-slate-200 hover:border-[#0E6C99] bg-slate-50/80 hover:bg-sky-50/50 flex items-center justify-between text-left transition-all cursor-pointer group"
                 >

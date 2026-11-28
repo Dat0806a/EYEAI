@@ -63,6 +63,10 @@ export function useAuth() {
     };
   }, []);
 
+  /**
+   * Lay ho so nguoi dung tu bang `profiles` tren Supabase de xac dinh `account_type` ('impaired' | 'patient').
+   * Neu chua co dong ho so trong co so du lieu, chuyen sang dung `user_metadata` de phan luong dung giao dien.
+   */
   const fetchProfile = async (userId: string, currentUser?: User | null) => {
     const targetUser = currentUser || user;
     try {

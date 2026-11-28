@@ -21,6 +21,10 @@ const SYSTEM_INSTRUCTION =
   "Nếu người dùng cần hỗ trợ khẩn cấp hoặc cấp cứu, hãy gợi ý họ sử dụng tính năng SOS trên màn hình chính của LUCKY DREAM. " +
   "Tránh viết các đoạn quá dài, danh sách dài dòng hoặc bảng biểu phức tạp trừ khi người dùng yêu cầu chi tiết.";
 
+/**
+ * Lay khoa Gemini API tu bien moi truong Netlify (`GEMINI_API_KEY` hoac `VITE_GEMINI_API_KEY`).
+ * Dung cho hai duong dan ham dam may `/api/ai/chat` va `/api/gemini/chat` khi trien khai len Netlify.
+ */
 function getApiKey(): string {
   return (
     process.env.GEMINI_API_KEY ||
@@ -29,6 +33,10 @@ function getApiKey(): string {
   ).trim();
 }
 
+/**
+ * Xu ly yeu cau hoi dap AI phia ham dam may: kiem tra hop le tin nhan, lay toi da 15 luot lich su gan nhat
+ * va goi tuan tu cac mo hinh Gemini du phong cho den khi co cau tra loi hop le.
+ */
 async function processChat(body: any) {
   const apiKey = getApiKey();
   if (!apiKey) {

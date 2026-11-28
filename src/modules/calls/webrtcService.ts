@@ -18,6 +18,8 @@ export class WebRTCService {
 
   /**
    * Initialize RTCPeerConnection with STUN / TURN configuration
+   * Doc cac bien moi truong `VITE_WEBRTC_STUN_URL` va cau hinh TURN (`VITE_WEBRTC_TURN_URL`,
+   * `VITE_WEBRTC_TURN_USERNAME`, `VITE_WEBRTC_TURN_CREDENTIAL`) neu trien khai qua mang NAT chat.
    */
   public initPeerConnection(): RTCPeerConnection {
     if (this.pc && this.pc.signalingState !== 'closed') return this.pc;

@@ -4,6 +4,7 @@ import { AppButton } from '../../../components/ui/AppButton';
 import { AlertCircle, AlertTriangle, CheckCircle2, Plus, Trash2, Edit3, Loader2, Sparkles, HelpCircle } from 'lucide-react';
 import { OcrResultItem, ConfirmedLabResult, AnalysisBundle } from '../../../types/patient';
 import { confirmAnalysis } from '../../../services/patientService';
+import { useAgentRuntimeSync } from '../voice-agent/context/useAgentRuntimeSync';
 
 interface PatientReviewPageProps {
   reportId: string;
@@ -53,6 +54,26 @@ export function PatientReviewPage({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const uncertainCount = rows.filter((r) => r.isUncertain || r.ocrConfidence < 0.7).length;
+
+  // Sync review page state into Agent runtime store (no-ops in Default Mode)
+  useAgentRuntimeSync({
+    currentRoute: 'patient-review',
+    ocrResultCount: rows.length,
+    uncertainCount,
+    reviewRequired: uncertainCount > 0,
+    analysisStatus: loading ? 'running' : 'idle',
+    errorStatus: error,
+    labHighlights: rows.map((r) => ({
+      testCode: r.testCode,
+      testName: r.testName,
+      value: r.value,
+      unit: r.unit,
+      status: r.isUncertain ? 'UNCERTAIN' : 'OK',
+      referenceText: r.referenceText || null,
+    })),
+  });
+
   const updateRow = (index: number, field: keyof ReviewRow, val: any) => {
     setRows((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: val } : item)));
   };
@@ -79,8 +100,6 @@ export function PatientReviewPage({
   const removeRow = (index: number) => {
     setRows((prev) => prev.filter((_, i) => i !== index));
   };
-
-  const uncertainCount = rows.filter((r) => r.isUncertain || r.ocrConfidence < 0.7).length;
 
   const handleConfirm = async () => {
     setError(null);
@@ -198,6 +217,9 @@ export function PatientReviewPage({
               return (
                 <div
                   key={idx}
+                  data-agent-group={`Chỉ số #${idx + 1}`}
+                  role="listitem"
+                  aria-label={`${row.testName || 'Chỉ số'} #${idx + 1}: ${row.value} ${row.unit}`}
                   className={`p-4 rounded-[22px] border-2 flex flex-col gap-3 transition-all ${
                     isLowConfidence
                       ? 'border-amber-400 bg-amber-50/70 shadow-xs'

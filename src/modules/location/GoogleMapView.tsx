@@ -43,7 +43,10 @@ export function GoogleMapView({
     };
   }, []);
 
-  // Initialize Maps JS API Instance
+  /**
+   * Khoi tao ban do Google Maps voi `apiKey` (`VITE_GOOGLE_MAPS_API_KEY`).
+   * Neu thieu khoa API hoac gap loi xac thuc (`gm_authFailure`), tu dong chuyen sang khung nhung Google Maps du phong.
+   */
   const initMap = useCallback(async () => {
     if (!containerRef.current || useIframeFallback) return;
 

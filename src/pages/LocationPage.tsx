@@ -36,6 +36,7 @@ export function LocationPage({ onBack }: LocationPageProps) {
   const [shareSuccess, setShareSuccess] = useState<boolean>(false);
   const [showCoordsDetail, setShowCoordsDetail] = useState<boolean>(false);
 
+  // Doc khoa Google Maps API tu bien moi truong Vite; neu rong `GoogleMapView` se tu chuyen sang khung nhung du phong
   const googleMapsApiKey =
     (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string) ||
     '';

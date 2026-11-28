@@ -221,6 +221,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   /**
    * Acquire local media stream SAFELY preserving Eye Tracking camera
+   * Chi xin quyen micro (`audio: true, video: false`) cho cuoc goi thoai WebRTC,
+   * tuyet doi khong dung cham hay ngat luong camera dang chay o `EyeTrackingProvider`.
    */
   const acquireMediaStream = async (type: CallType): Promise<MediaStream> => {
     const tracks: MediaStreamTrack[] = [];
@@ -248,6 +250,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   /**
    * Start Outgoing Voice Call
+   * Khoi tao cuoc goi thoai di: tao ban ghi `calls` tren Supabase, vao room `call_room_{id}`,
+   * gui tin hieu do chuong `call:ring`, xin micro (giu nguyen camera mat) va gui SDP Offer WebRTC.
    */
   const startCall = async (
     friendId: string,
@@ -346,6 +350,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   /**
    * Accept Incoming Voice Call
+   */
+  /**
+   * Chap nhan cuoc goi thoai WebRTC den.
+   * - Xin quyen su dung micro, khoi tao ket noi ngang hang va gui tin hieu phan hoi SDP Answer cho nguoi goi qua Supabase.
+   * - Cap nhat trang thai cuoc goi sang `connected` de bat dau trao doi am thanh.
    */
   const acceptCall = async () => {
     if (!callSession || !currentUserId) return;
@@ -469,6 +478,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   /**
    * Clean up call resources SAFELY without stopping Eye Tracking camera!
+   */
+  /**
+   * Giai phong toan bo tai nguyen cuoc goi WebRTC khi ket thuc hoac huy cuoc goi.
+   * - Dong ket noi ngang hang, tat tat ca luong am thanh micro de giai phong thiet bi.
+   * - Xoa bo dem thoi gian goi, dong kenh thoi gian thuc Supabase va dat lai trang thai cuoc goi ve null.
    */
   const handleCleanup = () => {
     console.log('[CALL][CLEANUP] Cleaning up call resources');

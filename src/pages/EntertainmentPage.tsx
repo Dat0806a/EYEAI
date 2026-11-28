@@ -56,7 +56,10 @@ export function EntertainmentPage({ onBack }: EntertainmentPageProps) {
     }
   };
 
-  // Explicit Search Execution — ONLY called when user confirms!
+  /**
+   * Thuc thi tim kiem video YouTube theo danh muc (`books` | `radio` | `music`) khi nguoi dung xac nhan.
+   * Co khoa chong goi trung (`isLoading`), doc giong noi thong bao va goi `searchEntertainment` (`/api/entertainment/search`).
+   */
   const handleExecuteSearch = async (overrideQuery?: string) => {
     const queryToSearch = (overrideQuery !== undefined ? overrideQuery : searchQuery).trim();
 

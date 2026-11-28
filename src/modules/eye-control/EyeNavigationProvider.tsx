@@ -23,6 +23,11 @@ const EyeNavigationContext = createContext<EyeNavigationContextType | undefined>
 /**
  * Sorts focusable nodes in visual 2D reading/DOM order (top-to-bottom, left-to-right).
  */
+/**
+ * Sap xep danh sach cac nut co the chon theo thu tu doc truc quan 2 chieu (tu tren xuong, trai sang phai).
+ * Uu tien toa do luoi `(row, col)` tuong minh; neu khong co thi dung toa do khung hinh `getBoundingClientRect`
+ * (voi sai so cung hang 10px), va cuoi cung lay theo thu tu xuat hien trong tai lieu DOM.
+ */
 function sortNodesByVisualOrder(nodes: EyeFocusNode[]): EyeFocusNode[] {
   return [...nodes].sort((a, b) => {
     // 1. Explicit row and column grid indexing
@@ -94,6 +99,8 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
   /**
    * Pushes a new focus scope (e.g. 'contact-action-modal') onto the scope stack.
    * Traps all eye navigation inside this scope until popped.
+   * Day mot pham vi chon moi (hop thoai hoac cua so phu) len dinh ngan xep de giu tieu diem ben trong hop thoai,
+   * dong thoi luu lai nut dang chon truoc do de khoi phuc khi dong hop thoai.
    */
   const pushFocusScope = useCallback((scopeId: string, initialFocusId?: string) => {
     const currentFocused = activeFocusIdRef.current;
@@ -132,6 +139,11 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
 
   /**
    * Pops the specified focus scope and restores focus to previous element.
+   */
+  /**
+   * Dong va xoa mot pham vi chon khoi ngan xep khi hop thoai hoac ban phim ao bien mat.
+   * - Khoi phuc lai ma phan tu duoc chon truoc do (neu phan tu van ton tai tren giao dien).
+   * - Giup nguoi dung dieu khien bang mat tiep tuc thao tac dung vi tri cu sau khi dong hop thoai.
    */
   const popFocusScope = useCallback((scopeId: string) => {
     const prevFocusId = previousFocusByScopeRef.current.get(scopeId) || null;
@@ -273,6 +285,14 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /**
+   * Ham dieu huong tieu diem 2 chieu theo lenh mat (`UP`, `DOWN`, `LEFT`, `RIGHT`, `NEXT`, `BACK`):
+   * - Buoc 0: Chi loc cac phan tu thuoc `activeScopeId` (giu tieu diem ben trong hop thoai) va dang hien thi (`width/height > 0`).
+   * - Pha 1 (Dieu huong theo luoi): Neu phan tu hien tai co `(row, col)`, tim phan tu cung `groupId` theo hang/cot.
+   * - Pha 2 (Tim kiem khong gian 2 chieu): Tinh vector tam giua cac phan tu, loc theo hinh non huong liec (`<= 2.2x`)
+   *   va cham diem uu tien phan tu cung hang (`do chong lap * 0.6` so voi `d + 1.8 * d_perp`).
+   * - Tra ve `true` neu nhay sang phan tu moi, `false` neu da dung bien man hinh.
+   */
   const navigate = useCallback((direction: EyeAction): boolean => {
     if (direction === 'NONE' || direction === 'SELECT' || direction === 'ESCAPE' || direction === 'DOUBLE_BLINK') return false;
 
@@ -437,6 +457,10 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
     return false;
   }, []);
 
+  /**
+   * Kich hoat phan tu dang duoc chon (`activeFocusId`) khi nhan lenh chon (chop mat 2 lan hoac phim Enter).
+   * Neu chua co phan tu nao duoc chon hop le, tu dong chon phan tu dau tien trong pham vi hien tai.
+   */
   const triggerSelect = useCallback((): boolean => {
     const currentScope = scopeStackRef.current.length > 0
       ? scopeStackRef.current[scopeStackRef.current.length - 1]
@@ -476,6 +500,12 @@ export function EyeNavigationProvider({ children }: { children: ReactNode }) {
     return false;
   }, []);
 
+  /**
+   * Xu ly lenh thoat hoac quay lai (`ESCAPE`) khi nguoi dung nhay mat kep (`DOUBLE_BLINK`).
+   * - Uu tien goi cac ham thoat da dang ky theo thu tu vao sau ra truoc de dong hop thoai truoc.
+   * - Neu khong co ham nao xu ly va dang o pham vi hop thoai con, tu dong dong pham vi hien tai.
+   * - Neu van khong xu ly duoc o cap thanh phan, cho phep `App.tsx` quay lai trang truoc hoac ve trang chu.
+   */
   const triggerEscape = useCallback((): boolean => {
     if (process.env.NODE_ENV === 'development' || (import.meta as any).env?.DEV) {
       console.log('[EYE NAV] triggerEscape called (DOUBLE BLINK)');

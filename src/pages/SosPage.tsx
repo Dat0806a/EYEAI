@@ -36,6 +36,10 @@ export function SosPage({ onBack, autoCall = false }: SosPageProps) {
 
   const callIntervalRef = useRef<any>(null);
 
+  /**
+   * Kich hoat giao dien cuoc goi khan cap SOS (hien thi hop thoai dem gio + phat canh bao giong noi).
+   * Luu y: Hien dang mo phong giao dien va thong bao giong noi, chua noi API vien thong hay SMS that.
+   */
   const startEmergencyCall = (contact: EmergencyContact) => {
     setSelectedContact(contact);
     setHasSosTriggered(true);

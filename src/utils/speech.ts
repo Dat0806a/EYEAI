@@ -207,6 +207,7 @@ function getSharedAudioElement(): HTMLAudioElement | null {
 /**
  * Automatically revives AudioContext and SpeechSynthesis after media hardware changes
  * (e.g. camera stream started or stopped, route changes, or user navigation).
+ * Khoi phuc AudioContext (neu bi suspended/interrupted) va Web Speech API sau khi bat/tat camera.
  */
 export function recoverAudioSession() {
   if (typeof window === 'undefined') return;
@@ -235,6 +236,11 @@ export function recoverAudioSession() {
 
 /**
  * Pre-unlocks audio playback contexts on initial user interaction (tuned for iOS Safari & Chrome).
+ */
+/**
+ * Mo khoa Web Audio / SpeechSynthesis tren trinh duyet va thiet bi di dong (iOS Safari / Chrome).
+ * - Can duoc goi trong lan tuong tac nguoi dung dau tien (click, cham man hinh, nhap phim).
+ * - Phat mot am thanh im lang / utterance rong de danh thuc audio context va nap danh sach giong noi.
  */
 export function unlockAudio() {
   if (typeof window === 'undefined') return;
@@ -537,6 +543,11 @@ function playAudioBuffer(
  * Plays a single audio chunk for Google Chrome on Desktop via /api/tts.
  * Includes AbortController to abort previous fetches and in-memory cache to prevent lag.
  */
+/**
+ * Phat mot doan van ban tieng Viet qua duong dan `/api/tts` (bo trung chuyen Google Translate TTS).
+ * - Dung khi trinh duyet thieu giong tieng Viet cai san (hoac giong may qua kho nghe).
+ * - Ho tro huy ngang bang ma phien `sessionId` de khong bi chong tieng khi nguoi dung chuyen muc nhanh.
+ */
 async function playSingleChunkOnline(
   chunk: string,
   volume: number,
@@ -692,6 +703,11 @@ async function playOnlineTTS(
  * Speaks Vietnamese text out loud using the optimal per-platform engine:
  * - Edge & iOS Safari: Native speech synthesis (0ms latency, zero network lag, zero rate limits).
  * - Chrome on Desktop: Online Serverless /api/tts with fetch aborting and RAM caching.
+ *
+ * Ham phat giong noi tieng Viet chinh cho toan phan he Nguoi suy giam:
+ * 1. Kiem tra `speakerEnabled` va lam sach ky tu dinh dang markdown.
+ * 2. Danh thuc bo am thanh trinh duyet (`recoverAudioSession`) va ngat cau doc cu (`stopSpeech`).
+ * 3. Uu tien giong ban dia (Edge/iOS/Android); neu khong co (Chrome may tinh) thi goi `/api/tts` va luu dem RAM 60 muc.
  */
 export function speakVietnamese(
   text: string,

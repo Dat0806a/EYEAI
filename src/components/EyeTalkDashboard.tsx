@@ -321,6 +321,8 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
       console.warn("Server /api/gemini/chat unreachable, falling back:", err);
     }
 
+    // Phuong an du phong ket noi truc tiep Gemini API tu trinh duyet (giao dien phien ban cu v2.1)
+    // Doc khoa API tu bien moi truong `VITE_GEMINI_API_KEY` hoac `GEMINI_API_KEY` neu may chu `/api/ai-chat` khong phan hoi.
     if (!reply) {
       try {
         const apiKey = (

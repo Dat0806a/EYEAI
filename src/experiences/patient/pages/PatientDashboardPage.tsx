@@ -14,15 +14,20 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { PatientChatWidget } from '../components/PatientChatWidget';
+import { PatientModeSwitchBadge } from '../mode/PatientModeSwitchBadge';
+import { usePatientMode } from '../mode/PatientModeProvider';
 import { getHistory } from '../../../services/patientService';
 import { HistoryReport } from '../../../types/patient';
+import { useAgentRuntimeSync } from '../voice-agent/context/useAgentRuntimeSync';
 
 interface PatientDashboardPageProps {
   onNavigate: (route: string, params?: Record<string, string>) => void;
+  onOpenModeSelect?: () => void;
 }
 
-export function PatientDashboardPage({ onNavigate }: PatientDashboardPageProps) {
+export function PatientDashboardPage({ onNavigate, onOpenModeSelect }: PatientDashboardPageProps) {
   const { profile, user } = useAuth();
+  const { mode, selectMode } = usePatientMode();
   const [recentReports, setRecentReports] = useState<HistoryReport[]>([]);
 
   useEffect(() => {
@@ -30,6 +35,12 @@ export function PatientDashboardPage({ onNavigate }: PatientDashboardPageProps) 
       setRecentReports(data.slice(0, 3));
     });
   }, []);
+
+  // Sync dashboard state into Agent runtime store (no-ops in Default Mode)
+  useAgentRuntimeSync({
+    currentRoute: 'patient-home',
+    recentReportsCount: recentReports.length,
+  });
 
   const displayName = profile?.display_name || user?.email?.split('@')[0] || 'Bệnh nhân';
 
@@ -46,11 +57,17 @@ export function PatientDashboardPage({ onNavigate }: PatientDashboardPageProps) 
       <main className="flex-1 max-w-md md:max-w-xl mx-auto w-full px-4 py-6 flex flex-col gap-6">
         {/* Welcome Greeting Banner */}
         <div className="p-6 rounded-[28px] bg-gradient-to-r from-sky-500/15 via-blue-500/10 to-indigo-500/15 border-2 border-[#0E6C99]/20 shadow-sm flex flex-col gap-2 relative overflow-hidden">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="px-3 py-1 rounded-full bg-[#0E6C99] text-white font-black text-xs uppercase tracking-wider">
               Chế độ Bệnh nhân
             </span>
-            <Sparkles className="w-5 h-5 text-amber-500 animate-pulse" />
+            <div className="flex items-center gap-2">
+              <PatientModeSwitchBadge
+                onSwitchMode={(next) => selectMode(next)}
+                onOpenModeSelect={onOpenModeSelect}
+              />
+              <Sparkles className="w-5 h-5 text-amber-500 animate-pulse" />
+            </div>
           </div>
           <h2 className="text-2xl font-black text-[#14213D] mt-1">
             Xin chào, {displayName} 👋
@@ -161,10 +178,12 @@ export function PatientDashboardPage({ onNavigate }: PatientDashboardPageProps) 
               </AppButton>
             </div>
           ) : (
-            <div className="flex flex-col gap-2.5">
-              {recentReports.map((report) => (
+            <div className="flex flex-col gap-2.5" role="list" aria-label="Danh sách xét nghiệm gần đây">
+              {recentReports.map((report, idx) => (
                 <button
                   key={report.id}
+                  role="listitem"
+                  aria-label={`Phiếu xét nghiệm #${idx + 1}`}
                   onClick={() => onNavigate('patient-analysis', { reportId: report.id })}
                   className="p-3.5 rounded-2xl border border-slate-200 hover:border-[#0E6C99] bg-slate-50/80 hover:bg-sky-50/50 flex items-center justify-between text-left transition-all cursor-pointer"
                 >
@@ -184,8 +203,8 @@ export function PatientDashboardPage({ onNavigate }: PatientDashboardPageProps) 
         </div>
       </main>
 
-      {/* Floating Medical AI Chatbot */}
-      <PatientChatWidget />
+      {/* Floating Medical AI Chatbot (Default Mode only; replaced by AI Agent in Mode B) */}
+      {mode !== 'agent' && <PatientChatWidget />}
     </div>
   );
 }

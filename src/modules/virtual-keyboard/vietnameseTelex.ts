@@ -1,3 +1,8 @@
+/**
+ * Bo ghep dau tieng Viet kieu Telex don gian cho ban phim ao.
+ * Kiem tra 2 ky tu cuoi cua chuoi vua nhap: neu khop cap (nguyen am + phim dau s/f/r/x/j),
+ * tu dong gop thanh chu tieng Viet co dau (vi du: "as" -> "a sac", "ef" -> "e huyen").
+ */
 export function applyVietnameseAccents(text: string): string {
   if (!text) return '';
 
