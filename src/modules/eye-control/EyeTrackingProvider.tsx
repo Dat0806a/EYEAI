@@ -11,6 +11,52 @@ import {
 import { analyzeEyes, Point } from './eyeTracker';
 import { LowLightExposureProcessor, extractFaceRoiFromLandmarks } from './lowLightFilter';
 import { speakVietnamese, updateSpeechSettings, recoverAudioSession } from '../../utils/speech';
+import { AccountType } from '../../types/account';
+import {
+  PRIVACY_POLICY_VERSION,
+  ConsentTrigger,
+  UserConsentState,
+  ConsentLogEntry,
+} from '../privacy/types';
+import {
+  getConsentState,
+  grantConsent,
+  revokeConsent,
+  getConsentLogs,
+  subscribeConsentChanges,
+  clearUserEyeControlLocalData,
+  createEmptyConsentState,
+  appendConsentLog,
+  hasValidFaceProcessingConsent,
+} from '../privacy/consentService';
+import {
+  bindEphemeralStoreSession,
+  setEphemeralLandmarks,
+  setEphemeralLowLightStats,
+  clearEphemeralEyeData,
+  getLatestLandmarks,
+} from './landmarkStore';
+import {
+  DEFAULT_CALIBRATION_DATA,
+  DEFAULT_CALIBRATION_RETENTION_DAYS,
+  StoredCalibrationProfileV1,
+  loadCalibrationProfile,
+  saveCalibrationProfile,
+  deleteCalibrationProfile,
+  readPersistedCalibrationProfile,
+} from './calibrationStorage';
+
+export interface EyeTrackingAuthContextInput {
+  isAuthenticated: boolean;
+  loading: boolean;
+  userId: string | null;
+  accountType: AccountType | null;
+}
+
+export interface EyeTrackingProviderProps {
+  children: ReactNode;
+  auth?: EyeTrackingAuthContextInput;
+}
 
 export interface EyeTrackingSettingsContextType {
   settings: EyeControlSettings;
@@ -46,6 +92,21 @@ export interface EyeTrackingSettingsContextType {
   triggerManualAction: (action: EyeAction) => void;
   isVisualizerOpen: boolean;
   setVisualizerOpen: (open: boolean) => void;
+  consentState: UserConsentState;
+  consentLogs: ConsentLogEntry[];
+  isConsentModalOpen: boolean;
+  openConsentModal: () => void;
+  closeConsentModal: () => void;
+  grantFaceProcessingConsent: (alsoGrantCalibrationStorage?: boolean, trigger?: ConsentTrigger) => void;
+  revokeFaceProcessingConsent: (trigger?: ConsentTrigger) => void;
+  grantCalibrationStorageConsent: (trigger?: ConsentTrigger) => void;
+  revokeCalibrationStorageConsent: (trigger?: ConsentTrigger) => void;
+  deleteCalibrationData: () => void;
+  deleteAllLocalEyeData: () => void;
+  persistedCalibrationProfile: StoredCalibrationProfileV1 | null;
+  calibrationRetentionDays: number;
+  activeSessionId: number;
+  privacyPolicyVersion: string;
 }
 
 export interface EyeTrackingTelemetryContextType {
@@ -72,7 +133,24 @@ const ACTION_COOLDOWN_MS = 2500;
  * 4. Hieu chuan 5 huong (`start5PointCalibration`), can tam nhanh (`reZeroCenter`) va che do mo phong.
  * 5. Tach doi 2 ngu canh (`SettingsContext` va `TelemetryContext`) de tranh ve lai toan bo giao dien o 15 khung hinh/giay.
  */
-export function EyeTrackingProvider({ children }: { children: ReactNode }) {
+export function EyeTrackingProvider({ children, auth }: EyeTrackingProviderProps) {
+  const resolvedAuth: EyeTrackingAuthContextInput = auth ?? {
+    isAuthenticated: false,
+    loading: false,
+    userId: null,
+    accountType: null,
+  };
+  const authRef = useRef<EyeTrackingAuthContextInput>(resolvedAuth);
+  authRef.current = resolvedAuth;
+
+  const isAccountAuthorized = Boolean(
+    resolvedAuth.isAuthenticated &&
+      !resolvedAuth.loading &&
+      resolvedAuth.userId &&
+      resolvedAuth.accountType === 'impaired'
+  );
+  const authorizedUserId = isAccountAuthorized ? resolvedAuth.userId : null;
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const processedCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -81,6 +159,29 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   const faceMeshRef = useRef<any>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const isProcessingRef = useRef<boolean>(false);
+  const faceMeshSendingRef = useRef<boolean>(false);
+
+  // Tracking Session Generation Token & concurrency guard
+  const sessionTokenRef = useRef<number>(0);
+  const inFlightStartTokenRef = useRef<number | null>(null);
+  const sendingSessionTokenRef = useRef<number | null>(null);
+  const trackCleanupRef = useRef<(() => void) | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<number>(0);
+
+  // Dual-layer Privacy Consent State (fail-closed when unauthenticated or loading)
+  const [consentState, setConsentState] = useState<UserConsentState>(() =>
+    getConsentState(authorizedUserId)
+  );
+  const [consentLogs, setConsentLogs] = useState<ConsentLogEntry[]>(() =>
+    getConsentLogs(authorizedUserId)
+  );
+  const [isConsentModalOpen, setConsentModalOpen] = useState<boolean>(false);
+  const [persistedCalibrationProfile, setPersistedCalibrationProfile] =
+    useState<StoredCalibrationProfileV1 | null>(() =>
+      authorizedUserId ? readPersistedCalibrationProfile(authorizedUserId) : null
+    );
+  const pendingCameraStartAfterConsentRef = useRef<boolean>(false);
+  const promptedUserRef = useRef<string | null>(null);
 
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [libsLoading, setLibsLoading] = useState(true);
@@ -191,46 +292,14 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     if (!settings.lowLightFilterEnabled) {
       lowLightProcessorRef.current?.reset();
       processedCanvasRef.current = null;
-      if (typeof window !== 'undefined') {
-        delete (window as any).__eyeai_lowlight_stats;
-      }
+      setEphemeralLowLightStats(sessionTokenRef.current, null);
     }
   }, [settings.lowLightFilterEnabled]);
 
-  // Calibration state with 5 directions
-  const [calibration, setCalibration] = useState<EyeCalibrationData>(() => {
-    const saved = localStorage.getItem('eyeai_calibration') || localStorage.getItem('luckydream_eye_calibration');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return {
-          ...parsed,
-          thresholdUp: Math.max(0.016, Math.min(parsed.thresholdUp || 0.018, 0.026)),
-          thresholdDown: Math.max(0.016, Math.min(parsed.thresholdDown || 0.018, 0.026)),
-          thresholdLeft: Math.max(0.024, Math.min(parsed.thresholdLeft || 0.028, 0.036)),
-          thresholdRight: Math.max(0.024, Math.min(parsed.thresholdRight || 0.028, 0.036)),
-          thresholdV: Math.max(0.016, Math.min(parsed.thresholdV || 0.018, 0.026)),
-          thresholdH: Math.max(0.024, Math.min(parsed.thresholdH || 0.028, 0.036)),
-          isCalibrated: false, // Ensure dynamic auto-centering on fresh startup
-        };
-      } catch (e) {
-        // Fallback
-      }
-    }
-    return {
-      neutralEAR: 0.25,
-      blinkThreshold: 0.15,
-      neutralIrisH: 0.0,
-      neutralIrisV: 0.0,
-      thresholdH: 0.026,
-      thresholdV: 0.018,
-      thresholdUp: 0.018,
-      thresholdDown: 0.018,
-      thresholdLeft: 0.026,
-      thresholdRight: 0.026,
-      isCalibrated: false,
-    };
-  });
+  // Calibration state with 5 directions (RAM-by-default; user-scoped storage only with valid consent)
+  const [calibration, setCalibration] = useState<EyeCalibrationData>(() =>
+    loadCalibrationProfile(authorizedUserId).data
+  );
 
   const [calibrationStage, setCalibrationStage] = useState<'idle' | 'countdown' | 'collecting' | 'completed'>('idle');
   const [calibrationStep, setCalibrationStep] = useState<CalibrationStep>('idle');
@@ -317,8 +386,11 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
    * - Neu bat `soundFeedback`, phat am thanh tieng Viet tuong ung hoac bao dung bien.
    * - Neu la `EMERGENCY`, phat them CustomEvent `eyeai:emergency` de mo ngay trang SOS.
    */
-  const dispatchAction = useCallback((action: EyeAction): boolean => {
+  const dispatchAction = useCallback((action: EyeAction, expectedSessionToken?: number): boolean => {
     if (action === 'NONE') return false;
+    if (expectedSessionToken !== undefined && expectedSessionToken !== sessionTokenRef.current) {
+      return false;
+    }
 
     let executed = false;
     gestureCallbacksRef.current.forEach(cb => {
@@ -447,7 +519,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
 
   const lastFrameTime = useRef<number>(performance.now());
 
-  // Load MediaPipe CDN Script once
+  // Load pinned self-hosted MediaPipe FaceMesh script once
   useEffect(() => {
     let active = true;
     async function loadLibraries() {
@@ -457,12 +529,12 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
           return;
         }
         const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js';
+        script.src = '/mediapipe/face_mesh/face_mesh.js';
         script.async = true;
 
         const scriptPromise = new Promise((resolve, reject) => {
           script.onload = () => resolve(true);
-          script.onerror = () => reject(new Error('Failed to load FaceMesh library from CDN.'));
+          script.onerror = () => reject(new Error('Failed to load self-hosted FaceMesh library.'));
         });
 
         document.head.appendChild(script);
@@ -490,15 +562,22 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
    *   -> Lam muot EMA 0.45 -> Phan loai TRAI/PHAI/LEN (tat XUONG) voi vung tre 0.55 -> Nha ve tam 140ms -> Giu nhin 220ms.
    * - Gui `trackingState` len giao dien React co dieu tiet tan suat (65ms binh thuong, 40ms khi dang dem chop).
    */
-  const processFaceMeshResults = useCallback((results: any) => {
+  const processFaceMeshResults = useCallback((results: any, expectedSessionToken?: number) => {
+    if (
+      expectedSessionToken !== undefined &&
+      expectedSessionToken !== sessionTokenRef.current
+    ) {
+      return;
+    }
+
     const now = performance.now();
     const elapsed = Math.min(100, Math.max(1, now - lastFrameTime.current));
     lastFrameTime.current = now;
 
     const landmarks = results.multiFaceLandmarks?.[0];
 
-    // Cache latest landmarks globally for live canvas overlays
-    (window as any).__eyeai_latest_landmarks = landmarks;
+    // Cache latest landmarks inside encapsulated module store (never on window)
+    setEphemeralLandmarks(sessionTokenRef.current, landmarks ?? null);
 
     // Fast exit if no face detected
     if (!landmarks) {
@@ -600,7 +679,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         firstBlinkTime.current = 0;
         lastBlinkEndTime.current = now;
 
-        const executed = dispatchAction('DOWN');
+        const executed = dispatchAction('DOWN', expectedSessionToken);
         const nowTs = performance.now();
         cooldownTimer.current = 1200; // 1.2s cooldown
         actionTriggeredThisFrame = 'DOWN';
@@ -654,7 +733,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         lastBlinkEndTime.current = now;
         selectSuccessUntil.current = now + 1200; // Keep showing 2 / 3 on UI for 1.2s
 
-        const executed = dispatchAction('SELECT');
+        const executed = dispatchAction('SELECT', expectedSessionToken);
         const nowTs = performance.now();
         cooldownTimer.current = ACTION_COOLDOWN_MS; // 2.5s cooldown
         actionTriggeredThisFrame = 'SELECT';
@@ -762,8 +841,10 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
               lastBlinkEndTime.current = now;
               emergencySuccessUntil.current = now + 2000; // Keep showing 3 / 3 on UI for 2s
 
-              const executed = dispatchAction('EMERGENCY');
-              window.dispatchEvent(new CustomEvent('eyeai:emergency'));
+              const executed = dispatchAction('EMERGENCY', expectedSessionToken);
+              if (expectedSessionToken === undefined || expectedSessionToken === sessionTokenRef.current) {
+                window.dispatchEvent(new CustomEvent('eyeai:emergency'));
+              }
               const nowTs = performance.now();
               cooldownTimer.current = ACTION_COOLDOWN_MS + 500; // 3.0s cooldown
               actionTriggeredThisFrame = 'EMERGENCY';
@@ -1006,7 +1087,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
               gazeFiredInThisLook.current = true;
               reArmedRef.current = false;
 
-              const executed = dispatchAction(mappedAction);
+              const executed = dispatchAction(mappedAction, expectedSessionToken);
               if (executed) {
                 lastExecutedActionRef.current = mappedAction;
                 lastExecutedTimestampRef.current = now;
@@ -1494,35 +1575,206 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     };
   }, [settings.simulatorMode, dispatchAction]);
 
+  const isAuthorizedForCamera = useCallback((): boolean => {
+    const a = authRef.current;
+    if (!a.isAuthenticated || a.loading || !a.userId || a.accountType !== 'impaired') {
+      return false;
+    }
+    return hasValidFaceProcessingConsent(a.userId);
+  }, []);
+
+  const calibrationCancelRef = useRef<boolean>(false);
+
+  /**
+   * Centralized idempotent teardown for Eye Tracking session (Phase 2.2).
+   * Enforces deterministic cleanup order and guards against closing/overwriting a newer session.
+   */
+  const teardownTrackingSession = useCallback(() => {
+    // 1. Invalidate session token so any pending async callbacks/actions are rejected
+    const nextInvalidToken = sessionTokenRef.current + 1;
+    sessionTokenRef.current = nextInvalidToken;
+    inFlightStartTokenRef.current = null;
+    sendingSessionTokenRef.current = null;
+    bindEphemeralStoreSession(nextInvalidToken);
+    setActiveSessionId(0);
+
+    // 2-3. Cancel any active calibration
+    calibrationCancelRef.current = true;
+    setCalibrationStage(prev => (prev !== 'idle' ? 'idle' : prev));
+    setCalibrationStep(prev => (prev !== 'idle' ? 'idle' : prev));
+    setCalibrationProgress(0);
+
+    // 4. Cancel requestAnimationFrame and clear current session send lock
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    isProcessingRef.current = false;
+
+    // 5. Detach track listeners & stop all MediaStream tracks
+    if (trackCleanupRef.current) {
+      try {
+        trackCleanupRef.current();
+      } catch {
+        // Ignore
+      }
+      trackCleanupRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch {
+          // Ignore
+        }
+      });
+      mediaStreamRef.current = null;
+      setCameraStream(null);
+    }
+
+    // 6. Pause video and detach srcObject
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+      } catch {
+        // Ignore
+      }
+      videoRef.current.srcObject = null;
+    }
+
+    // 7. Release FaceMesh instance safely (defer close if send() is mid-flight)
+    const oldFaceMesh = faceMeshRef.current;
+    faceMeshRef.current = null;
+    if (oldFaceMesh && !faceMeshSendingRef.current) {
+      try {
+        if (typeof oldFaceMesh.close === 'function') {
+          Promise.resolve(oldFaceMesh.close()).catch(() => {});
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    faceMeshSendingRef.current = false;
+
+    // 8. Release Canvas & Low-Light resources
+    lowLightProcessorRef.current?.reset();
+    processedCanvasRef.current = null;
+
+    // 9. Clear ephemeral landmarks & low-light telemetry
+    clearEphemeralEyeData();
+
+    // 10. Reset EyeMetrics ref
+    latestMetricsRef.current = {
+      avgEAR: 0.25,
+      leftEAR: 0.25,
+      rightEAR: 0.25,
+      compensatedGazeX: 0,
+      compensatedGazeY: 0,
+      rawGazeX: 0,
+      rawGazeY: 0,
+      headYaw: 0,
+      headPitch: 0,
+      confidence: 0,
+    };
+
+    // 11. Reset runtime calibration warm-up counters
+    initFramesCount.current = 0;
+    noFaceFramesCount.current = 0;
+    neutralRunningX.current = 0;
+    neutralRunningY.current = 0;
+    neutralRunningEAR.current = 0.26;
+
+    // 12. Reset Gesture FSM state
+    isEyesClosed.current = false;
+    closeStartTime.current = null;
+    blinkCountInGesture.current = 0;
+    firstBlinkTime.current = 0;
+    lastBlinkEndTime.current = 0;
+    selectSuccessUntil.current = 0;
+    emergencySuccessUntil.current = 0;
+    smoothGazeX.current = 0;
+    smoothGazeY.current = 0;
+    gazeDirState.current = 'CENTER';
+    currentGazeCandidate.current = 'CENTER';
+    gazeDwellStart.current = 0;
+    gazeFiredInThisLook.current = false;
+    reArmedRef.current = true;
+    centerStabilityStart.current = 0;
+
+    // 13. Reset cooldown timers
+    cooldownTimer.current = 0;
+    lastExecutedActionRef.current = 'NONE';
+    lastExecutedTimestampRef.current = 0;
+
+    // 14. Reset telemetry UI state to inactive
+    const stoppedState: EyeTrackingState = {
+      ...latestTelemetryRef.current,
+      cameraActive: false,
+      faceDetected: false,
+      eyesClosed: false,
+      closedDuration: 0.0,
+      blinkCount: 0,
+      blinkWindowRemainingMs: 0,
+      currentAction: 'NONE',
+      actionProgress: 0,
+      gazeDirection: 'CENTER',
+      directionH: 'CENTER',
+      directionV: 'CENTER',
+      rawGazeX: 0,
+      rawGazeY: 0,
+      gazeX: 0,
+      gazeY: 0,
+      confidence: 0,
+      cooldownRemainingMs: 0,
+      reArmed: true,
+    };
+    latestTelemetryRef.current = stoppedState;
+    setTrackingState(stoppedState);
+
+    // Auto-revive audio session after camera stream teardown
+    recoverAudioSession();
+  }, []);
+
   /**
    * Khoi chay vong lap xu ly khung hinh MediaPipe FaceMesh qua `requestAnimationFrame`:
-   * - Khoi tao mot thuc the duy nhat trong `faceMeshRef.current` (bat che do `refineLandmarks: true` de lay 478 diem moc).
-   * - Dung khoa `isProcessingRef` de chong gui chong cheo khung hinh khi may dang ban suy luan.
-   * - Neu bat `lowLightFilterEnabled`, tien xu ly khung hinh qua `LowLightExposureProcessor` (neu loi thi dung video goc).
+   * - Khoi tao thuc the FaceMesh gan voi `sessionToken` hien tai.
+   * - Kiem tra `sessionToken` o moi ranh gioi bat dong bo (`onResults`, `send`, `requestAnimationFrame`).
    */
-  const startTrackingLoop = useCallback(() => {
+  const startTrackingLoop = useCallback((sessionToken: number) => {
     if (!(window as any).FaceMesh) return;
+    if (sessionToken !== sessionTokenRef.current || !isAuthorizedForCamera()) return;
 
     if (!faceMeshRef.current) {
       const faceMesh = new (window as any).FaceMesh({
-        locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        locateFile: (file: string) => `/mediapipe/face_mesh/${file}`,
       });
       faceMesh.setOptions({
         maxNumFaces: 1,
         refineLandmarks: true,
         minDetectionConfidence: 0.6,
-        minTrackingConfidence: 0.6
+        minTrackingConfidence: 0.6,
       });
-      faceMesh.onResults(processFaceMeshResults);
+      faceMesh.onResults((res: any) => {
+        if (sessionToken !== sessionTokenRef.current || !isAuthorizedForCamera()) {
+          return;
+        }
+        processFaceMeshResults(res, sessionToken);
+      });
       faceMeshRef.current = faceMesh;
     }
 
     lastFrameTime.current = performance.now();
 
     const render = async () => {
+      if (sessionToken !== sessionTokenRef.current || !isAuthorizedForCamera()) {
+        return;
+      }
       const video = videoRef.current;
-      if (video && video.readyState >= 2 && !isProcessingRef.current && faceMeshRef.current) {
+      const activeFaceMesh = faceMeshRef.current;
+      if (video && video.readyState >= 2 && !isProcessingRef.current && activeFaceMesh) {
         isProcessingRef.current = true;
+        faceMeshSendingRef.current = true;
+        sendingSessionTokenRef.current = sessionToken;
         try {
           let frameSource: HTMLVideoElement | HTMLCanvasElement = video;
           if (lowLightFilterEnabledRef.current) {
@@ -1530,12 +1782,12 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
               if (!lowLightProcessorRef.current) {
                 lowLightProcessorRef.current = new LowLightExposureProcessor();
               }
-              const faceRoi = extractFaceRoiFromLandmarks((window as any).__eyeai_latest_landmarks);
+              const faceRoi = extractFaceRoiFromLandmarks(getLatestLandmarks() as Point[] | null);
               const processed = lowLightProcessorRef.current.processFrame(video, faceRoi);
               if (processed) {
                 processedCanvasRef.current = processed;
                 frameSource = processed;
-                (window as any).__eyeai_lowlight_stats = lowLightProcessorRef.current.getState();
+                setEphemeralLowLightStats(sessionToken, lowLightProcessorRef.current.getState());
               } else {
                 processedCanvasRef.current = null;
               }
@@ -1547,70 +1799,67 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
           } else {
             processedCanvasRef.current = null;
           }
-          await faceMeshRef.current.send({ image: frameSource });
+
+          if (sessionToken !== sessionTokenRef.current || faceMeshRef.current !== activeFaceMesh) {
+            return;
+          }
+          await activeFaceMesh.send({ image: frameSource });
         } catch (e) {
-          console.error('[FaceMesh send error]:', e);
+          if (sessionToken === sessionTokenRef.current) {
+            console.error('[FaceMesh send error]:', e);
+          }
         } finally {
-          isProcessingRef.current = false;
+          if (sendingSessionTokenRef.current === sessionToken) {
+            faceMeshSendingRef.current = false;
+            isProcessingRef.current = false;
+            sendingSessionTokenRef.current = null;
+          }
+          // If session was torn down while send() was in-flight, close the orphaned instance safely
+          if (faceMeshRef.current !== activeFaceMesh && typeof activeFaceMesh.close === 'function') {
+            try {
+              Promise.resolve(activeFaceMesh.close()).catch(() => {});
+            } catch {
+              // Ignore
+            }
+          }
         }
       }
-      if (mediaStreamRef.current && mediaStreamRef.current.active) {
+      if (
+        sessionToken === sessionTokenRef.current &&
+        isAuthorizedForCamera() &&
+        mediaStreamRef.current &&
+        mediaStreamRef.current.active
+      ) {
         animationFrameRef.current = requestAnimationFrame(render);
       }
     };
     animationFrameRef.current = requestAnimationFrame(render);
-  }, [processFaceMeshResults]);
+  }, [processFaceMeshResults, isAuthorizedForCamera]);
 
-  /**
-   * Dung vong lap requestAnimationFrame cua MediaPipe FaceMesh.
-   * - Huy animationFrameRef hien tai de ngung doc frame tu camera.
-   * - Dat trang thai dang chay tracking ve false.
-   */
   const stopTrackingLoop = useCallback(() => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    isProcessingRef.current = false;
-    lowLightProcessorRef.current?.reset();
-    processedCanvasRef.current = null;
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => {
-        track.stop();
-      });
-      mediaStreamRef.current = null;
-      setCameraStream(null);
-    }
-    if (videoRef.current) {
-      try {
-        videoRef.current.pause();
-      } catch {}
-      videoRef.current.srcObject = null;
-    }
-    const stoppedState: EyeTrackingState = {
-      ...latestTelemetryRef.current,
-      cameraActive: false,
-      faceDetected: false,
-      eyesClosed: false,
-      closedDuration: 0.0,
-      blinkCount: 0,
-      currentAction: 'NONE',
-    };
-    latestTelemetryRef.current = stoppedState;
-    setTrackingState(stoppedState);
-
-    // Auto-revive audio session after camera stream teardown
-    recoverAudioSession();
-  }, []);
+    teardownTrackingSession();
+  }, [teardownTrackingSession]);
 
   /**
    * Khoi tao va bat camera qua WebRTC `navigator.mediaDevices.getUserMedia`.
-   * - Kiem tra ngu canh bao mat (HTTPS hoac localhost) vi trinh duyet chan camera tren HTTP thuong.
-   * - Ap dung do phan giai uu tien 640x480 va toc do 30 khung hinh/giay de toi uu hieu nang MediaPipe.
-   * - Tu dong thu lai voi cau hinh toi gian `{ video: true }` neu thiet bi bao loi gioi han phan cung.
-   * - Gan luong video vao `videoRef` va bat dau vong lap theo doi mat sau khi du lieu hinh anh san sang.
+   * Enforce Auth Guard + Profile Guard + Account Type Guard + Face Processing Consent Guard + Session Token.
    */
-  const startCamera = useCallback(async () => {
+  const startCamera = useCallback(async (options?: { userInitiated?: boolean }) => {
+    const a = authRef.current;
+    if (!a.isAuthenticated || a.loading || !a.userId || a.accountType !== 'impaired') {
+      teardownTrackingSession();
+      return;
+    }
+
+    if (!hasValidFaceProcessingConsent(a.userId)) {
+      teardownTrackingSession();
+      if (options?.userInitiated) {
+        pendingCameraStartAfterConsentRef.current = true;
+        setConsentModalOpen(true);
+      }
+      return;
+    }
+
     const isSec = typeof window !== 'undefined' ? window.isSecureContext : false;
     const hasMediaDevices = typeof navigator !== 'undefined' ? !!navigator.mediaDevices : false;
     const hasGetUserMedia = typeof navigator !== 'undefined' ? !!navigator.mediaDevices?.getUserMedia : false;
@@ -1633,7 +1882,8 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
 
     if (mediaStreamRef.current && mediaStreamRef.current.active) {
       const activeTracks = mediaStreamRef.current.getVideoTracks().filter(t => t.readyState === 'live');
-      if (activeTracks.length > 0) {
+      if (activeTracks.length > 0 && sessionTokenRef.current > 0) {
+        const currentToken = sessionTokenRef.current;
         if (videoRef.current) {
           videoRef.current.muted = true;
           videoRef.current.defaultMuted = true;
@@ -1646,7 +1896,11 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
           } catch (e) {
             // Ignore
           }
-          startTrackingLoop();
+          if (currentToken !== sessionTokenRef.current || !isAuthorizedForCamera()) {
+            teardownTrackingSession();
+            return;
+          }
+          startTrackingLoop(currentToken);
         }
         const activeState = { ...latestTelemetryRef.current, cameraActive: true, cameraError: null };
         latestTelemetryRef.current = activeState;
@@ -1655,6 +1909,16 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         return;
       }
     }
+
+    // Prevent concurrent getUserMedia calls
+    if (inFlightStartTokenRef.current !== null) {
+      return;
+    }
+
+    const sessionToken = sessionTokenRef.current + 1;
+    sessionTokenRef.current = sessionToken;
+    inFlightStartTokenRef.current = sessionToken;
+    bindEphemeralStoreSession(sessionToken);
 
     try {
       const clearingState = { ...latestTelemetryRef.current, cameraError: null };
@@ -1672,19 +1936,64 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
           audio: false,
         });
       } catch (firstErr: any) {
+        if (sessionToken !== sessionTokenRef.current || !isAuthorizedForCamera()) {
+          inFlightStartTokenRef.current = null;
+          return;
+        }
         stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: false,
         });
       }
 
+      // Immediately stop tracks if session was invalidated or consent/auth revoked while awaiting getUserMedia
+      if (sessionToken !== sessionTokenRef.current || !isAuthorizedForCamera()) {
+        stream.getTracks().forEach(track => {
+          try {
+            track.stop();
+          } catch {
+            // Ignore
+          }
+        });
+        inFlightStartTokenRef.current = null;
+        return;
+      }
+
       const tracks = stream.getVideoTracks();
       if (tracks.length === 0) {
+        stream.getTracks().forEach(t => t.stop());
         throw new Error('No video tracks available in stream');
       }
 
+      if (trackCleanupRef.current) {
+        try {
+          trackCleanupRef.current();
+        } catch {
+          // Ignore
+        }
+        trackCleanupRef.current = null;
+      }
+
+      const handleTrackEnded = () => {
+        if (sessionToken !== sessionTokenRef.current) return;
+        teardownTrackingSession();
+      };
+      tracks.forEach((track) => {
+        if (typeof track.addEventListener === 'function') {
+          track.addEventListener('ended', handleTrackEnded);
+        }
+      });
+      trackCleanupRef.current = () => {
+        tracks.forEach((track) => {
+          if (typeof track.removeEventListener === 'function') {
+            track.removeEventListener('ended', handleTrackEnded);
+          }
+        });
+      };
+
       mediaStreamRef.current = stream;
       setCameraStream(stream);
+      setActiveSessionId(sessionToken);
 
       initFramesCount.current = 0;
       if (videoRef.current) {
@@ -1700,8 +2009,24 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         } catch (e) {
           console.warn('[EYE CAMERA] video.play() notice:', e);
         }
-        startTrackingLoop();
+
+        if (sessionToken !== sessionTokenRef.current || !isAuthorizedForCamera()) {
+          stream.getTracks().forEach(t => t.stop());
+          if (mediaStreamRef.current === stream) {
+            mediaStreamRef.current = null;
+            setCameraStream(null);
+          }
+          if (videoRef.current) {
+            videoRef.current.srcObject = null;
+          }
+          inFlightStartTokenRef.current = null;
+          return;
+        }
+
+        startTrackingLoop(sessionToken);
       }
+
+      inFlightStartTokenRef.current = null;
 
       const readyState = { ...latestTelemetryRef.current, cameraActive: true, cameraError: null };
       latestTelemetryRef.current = readyState;
@@ -1710,45 +2035,113 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       // Auto-revive audio session after camera stream activation
       recoverAudioSession();
     } catch (err: any) {
-      const errMsg = err.message || 'Không thể truy cập camera. Vui lòng cấp quyền camera.';
-      const errState = { ...latestTelemetryRef.current, cameraActive: false, cameraError: errMsg };
-      latestTelemetryRef.current = errState;
-      setTrackingState(errState);
+      inFlightStartTokenRef.current = null;
+      if (sessionToken === sessionTokenRef.current) {
+        const errMsg = err.message || 'Không thể truy cập camera. Vui lòng cấp quyền camera.';
+        const errState = { ...latestTelemetryRef.current, cameraActive: false, cameraError: errMsg };
+        latestTelemetryRef.current = errState;
+        setTrackingState(errState);
+      }
       recoverAudioSession();
     }
-  }, [startTrackingLoop]);
+  }, [startTrackingLoop, teardownTrackingSession, isAuthorizedForCamera]);
 
   const toggleCamera = useCallback(async () => {
+    if (!isAccountAuthorized) {
+      teardownTrackingSession();
+      return;
+    }
     if (mediaStreamRef.current && mediaStreamRef.current.active) {
-      stopTrackingLoop();
+      teardownTrackingSession();
     } else {
-      await startCamera();
+      await startCamera({ userInitiated: true });
     }
     recoverAudioSession();
-  }, [startCamera, stopTrackingLoop]);
+  }, [isAccountAuthorized, startCamera, teardownTrackingSession]);
 
+  // Synchronize auth, account switch, consent, and multi-tab revocation
   useEffect(() => {
-    if (settings.eyeControlEnabled && !libsLoading && !libError) {
-      startCamera();
-    } else if (!settings.eyeControlEnabled) {
-      stopTrackingLoop();
+    if (!isAccountAuthorized || !authorizedUserId) {
+      teardownTrackingSession();
+      setConsentModalOpen(false);
+      setConsentState(createEmptyConsentState(null));
+      setConsentLogs([]);
+      setPersistedCalibrationProfile(null);
+      setCalibration({ ...DEFAULT_CALIBRATION_DATA });
+      promptedUserRef.current = null;
+      return;
     }
-  }, [settings.eyeControlEnabled, libsLoading, libError, startCamera, stopTrackingLoop]);
+
+    const loadedConsent = getConsentState(authorizedUserId);
+    setConsentState(loadedConsent);
+    setConsentLogs(getConsentLogs(authorizedUserId));
+    const loadedCalib = loadCalibrationProfile(authorizedUserId);
+    setCalibration(loadedCalib.data);
+    setPersistedCalibrationProfile(loadedCalib.storedProfile);
+
+    const unsubscribe = subscribeConsentChanges(authorizedUserId, (nextConsent) => {
+      setConsentState(nextConsent);
+      setConsentLogs(getConsentLogs(authorizedUserId));
+      setPersistedCalibrationProfile(readPersistedCalibrationProfile(authorizedUserId));
+      if (!nextConsent.faceProcessing.granted || nextConsent.faceProcessing.policyVersion !== PRIVACY_POLICY_VERSION) {
+        teardownTrackingSession();
+        localStorage.setItem('luckydream_eye_enabled', 'false');
+        setSettings(prev => (prev.eyeControlEnabled ? { ...prev, eyeControlEnabled: false } : prev));
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [isAccountAuthorized, authorizedUserId, teardownTrackingSession]);
+
+  // Camera lifecycle controller: starts ONLY when authorized + consented + enabled + libs ready
+  useEffect(() => {
+    if (!isAccountAuthorized || !authorizedUserId) {
+      teardownTrackingSession();
+      return;
+    }
+
+    const faceGranted =
+      consentState.faceProcessing.granted &&
+      consentState.faceProcessing.policyVersion === PRIVACY_POLICY_VERSION;
+
+    if (settings.eyeControlEnabled && !faceGranted) {
+      teardownTrackingSession();
+      if (promptedUserRef.current !== authorizedUserId) {
+        promptedUserRef.current = authorizedUserId;
+        pendingCameraStartAfterConsentRef.current = true;
+        setConsentModalOpen(true);
+      }
+      return;
+    }
+
+    if (settings.eyeControlEnabled && faceGranted && !libsLoading && !libError) {
+      startCamera();
+    } else if (!settings.eyeControlEnabled || !faceGranted) {
+      teardownTrackingSession();
+    }
+  }, [
+    isAccountAuthorized,
+    authorizedUserId,
+    consentState.faceProcessing.granted,
+    consentState.faceProcessing.policyVersion,
+    settings.eyeControlEnabled,
+    libsLoading,
+    libError,
+    startCamera,
+    teardownTrackingSession,
+  ]);
 
   // Clean teardown on unmount
   useEffect(() => {
     return () => {
-      stopTrackingLoop();
+      teardownTrackingSession();
       lowLightProcessorRef.current?.dispose();
       lowLightProcessorRef.current = null;
       processedCanvasRef.current = null;
     };
-  }, [stopTrackingLoop]);
-
-  // =========================================================================
-  // 5. FIVE-POINT CALIBRATION WORKFLOW (CENTER -> UP -> DOWN -> LEFT -> RIGHT)
-  // =========================================================================
-  const calibrationCancelRef = useRef<boolean>(false);
+  }, [teardownTrackingSession]);
 
   const cancelCalibration = useCallback(() => {
     calibrationCancelRef.current = true;
@@ -1779,8 +2172,9 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       isCalibrated: false,
     };
     setCalibration(defaultCalib);
-    localStorage.removeItem('luckydream_eye_calibration');
-    localStorage.removeItem('eyeai_calibration');
+    const uid = authRef.current.userId;
+    deleteCalibrationProfile(uid);
+    setPersistedCalibrationProfile(null);
     setCalibrationMessage('Đã đặt lại hiệu chỉnh mặc định.');
     speakVietnamese('Đã đặt lại hiệu chỉnh');
   }, []);
@@ -1804,16 +2198,17 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     reArmedRef.current = true;
     centerStabilityStart.current = performance.now();
 
+    const uid = authRef.current.userId;
     setCalibration(prev => {
       const updated: EyeCalibrationData = {
         ...prev,
         neutralIrisH: neutralRunningX.current,
         neutralIrisV: neutralRunningY.current,
       };
-      try {
-        localStorage.setItem('eyeai_calibration', JSON.stringify(updated));
-        localStorage.setItem('luckydream_eye_calibration', JSON.stringify(updated));
-      } catch (e) {}
+      const saveRes = saveCalibrationProfile(uid, updated);
+      if (saveRes.saved && saveRes.profile) {
+        setPersistedCalibrationProfile(saveRes.profile);
+      }
       return updated;
     });
 
@@ -1834,20 +2229,33 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
 
   /**
    * Chay quy trinh hieu chuan 5 diem (giua, trai, phai, tren, duoi).
-   * - Huong dan nguoi dung nhin lan luot tung muc tieu va ghi nhan gia tri `irisRatio` cung `gazeRatio` tho.
-   * - Tinh nguong hieu chuan ca nhan hoa (giua, trai, phai, tren, duoi) va luu vao `calibrationProfileRef` cung `localStorage`.
-   * - Cho phep huy giua chung bang `calibrationCancelRef` neu nguoi dung dong hop thoai hoac bam huy.
+   * - Kiem tra session generation token o moi buoc bat dong bo.
+   * - Luu thong số tối giản vào User-scoped LocalStorage CHỈ KHI có Calibration Storage Consent hợp lệ;
+   *   nếu từ chối hoặc thu hồi quyền lưu, calibration vẫn chạy bình thường trong RAM (RAM-only).
    */
   const start5PointCalibration = useCallback(async () => {
+    if (!isAuthorizedForCamera()) {
+      setCalibrationMessage('Vui lòng cấp quyền xử lý camera trước khi hiệu chỉnh.');
+      return;
+    }
+
+    const calibSessionToken = sessionTokenRef.current;
+    const calibUserId = authRef.current.userId;
     calibrationCancelRef.current = false;
     setCalibrationStage('countdown');
     setCalibrationProgress(0);
+
+    const isStillValid = () =>
+      !calibrationCancelRef.current &&
+      sessionTokenRef.current === calibSessionToken &&
+      authRef.current.userId === calibUserId &&
+      isAuthorizedForCamera();
 
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
     // Helper to collect frames for a specific step
     const collectStepFrames = async (stepName: CalibrationStep, promptText: string, voicePrompt: string) => {
-      if (calibrationCancelRef.current) return null;
+      if (!isStillValid()) return null;
 
       setCalibrationStep(stepName);
       setCalibrationStage('collecting');
@@ -1862,8 +2270,9 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
       let samples = 0;
 
       for (let i = 0; i < 60 && samples < requiredSamples; i++) {
-        if (calibrationCancelRef.current) return null;
+        if (!isStillValid()) return null;
         await sleep(55);
+        if (!isStillValid()) return null;
 
         const currentMetrics = latestMetricsRef.current;
         if (currentMetrics.avgEAR > 0.12 && currentMetrics.confidence > 0.4) {
@@ -1896,7 +2305,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     try {
       // Step 1: Countdown
       for (let cd = 3; cd > 0; cd--) {
-        if (calibrationCancelRef.current) return;
+        if (!isStillValid()) return;
         setCalibrationMessage(`Chuẩn bị... Giữ đầu thẳng trong ${cd}s`);
         await sleep(1000);
       }
@@ -1907,7 +2316,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         'Bước 1/5: Hãy nhìn thẳng vào tâm camera',
         'Bước 1: Hãy nhìn thẳng vào tâm camera'
       );
-      if (!centerData || calibrationCancelRef.current) {
+      if (!centerData || !isStillValid()) {
         throw new Error('Không thu thập đủ dữ liệu nhìn thẳng. Vui lòng thử lại.');
       }
       await sleep(400);
@@ -1918,7 +2327,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         'Bước 2/5: Hãy nhìn lên phía trên',
         'Bước 2: Hãy nhìn lên phía trên'
       );
-      if (!upData || calibrationCancelRef.current) {
+      if (!upData || !isStillValid()) {
         throw new Error('Không thu thập đủ dữ liệu nhìn lên.');
       }
       await sleep(400);
@@ -1929,7 +2338,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         'Bước 3/5: Hãy nhìn xuống phía dưới',
         'Bước 3: Hãy nhìn xuống phía dưới'
       );
-      if (!downData || calibrationCancelRef.current) {
+      if (!downData || !isStillValid()) {
         throw new Error('Không thu thập đủ dữ liệu nhìn xuống.');
       }
       await sleep(400);
@@ -1940,7 +2349,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         'Bước 4/5: Hãy nhìn sang bên trái',
         'Bước 4: Hãy nhìn sang bên trái'
       );
-      if (!leftData || calibrationCancelRef.current) {
+      if (!leftData || !isStillValid()) {
         throw new Error('Không thu thập đủ dữ liệu nhìn trái.');
       }
       await sleep(400);
@@ -1951,7 +2360,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         'Bước 5/5: Hãy nhìn sang bên phải',
         'Bước 5: Hãy nhìn sang bên phải'
       );
-      if (!rightData || calibrationCancelRef.current) {
+      if (!rightData || !isStillValid()) {
         throw new Error('Không thu thập đủ dữ liệu nhìn phải.');
       }
 
@@ -1991,30 +2400,41 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
         calibrationDate: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
       };
 
+      // Guard against stale async completion after session reset/logout/account switch
+      if (!isStillValid()) return;
+
       setCalibration(finalCalibration);
       neutralRunningX.current = neutralX;
       neutralRunningY.current = neutralY;
       initFramesCount.current = 0;
-      try {
-        localStorage.setItem('eyeai_calibration', JSON.stringify(finalCalibration));
-        localStorage.setItem('luckydream_eye_calibration', JSON.stringify(finalCalibration));
-      } catch (e) {}
+
+      // Persist ONLY if Calibration Storage Consent is currently valid for this user
+      const saveResult = saveCalibrationProfile(calibUserId, finalCalibration);
+      setPersistedCalibrationProfile(saveResult.saved && saveResult.profile ? saveResult.profile : null);
 
       setCalibrationStep('completed');
       setCalibrationStage('completed');
-      setCalibrationMessage('Hiệu chỉnh 5 hướng thành công!');
+      setCalibrationMessage(
+        saveResult.saved
+          ? 'Hiệu chỉnh 5 hướng thành công!'
+          : 'Hiệu chỉnh 5 hướng thành công (Chế độ RAM-only)!'
+      );
       speakVietnamese('Hiệu chỉnh 5 hướng thành công');
 
       await sleep(1800);
-      setCalibrationStep('idle');
-      setCalibrationStage('idle');
+      if (sessionTokenRef.current === calibSessionToken) {
+        setCalibrationStep('idle');
+        setCalibrationStage('idle');
+      }
     } catch (err: any) {
-      setCalibrationStage('idle');
-      setCalibrationStep('idle');
-      setCalibrationMessage(err.message || 'Lỗi trong quá trình hiệu chỉnh.');
-      speakVietnamese('Hiệu chỉnh chưa hoàn thành');
+      if (sessionTokenRef.current === calibSessionToken) {
+        setCalibrationStage('idle');
+        setCalibrationStep('idle');
+        setCalibrationMessage(err.message || 'Lỗi trong quá trình hiệu chỉnh.');
+        speakVietnamese('Hiệu chỉnh chưa hoàn thành');
+      }
     }
-  }, []);
+  }, [isAuthorizedForCamera]);
 
   // Quick 1-point center calibration for backwards compatibility
   const startCalibration = useCallback(() => {
@@ -2022,12 +2442,122 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
   }, [start5PointCalibration]);
 
   const setEyeControlEnabled = useCallback((enabled: boolean) => {
+    if (enabled && isAccountAuthorized && authorizedUserId && !hasValidFaceProcessingConsent(authorizedUserId)) {
+      pendingCameraStartAfterConsentRef.current = true;
+      setConsentModalOpen(true);
+    }
     localStorage.setItem('luckydream_eye_enabled', String(enabled));
     setSettings(prev => ({ ...prev, eyeControlEnabled: enabled }));
     setTimeout(() => {
       recoverAudioSession();
     }, 50);
+  }, [isAccountAuthorized, authorizedUserId]);
+
+  const openConsentModal = useCallback(() => {
+    if (isAccountAuthorized) {
+      setConsentModalOpen(true);
+    }
+  }, [isAccountAuthorized]);
+
+  const closeConsentModal = useCallback(() => {
+    pendingCameraStartAfterConsentRef.current = false;
+    setConsentModalOpen(false);
   }, []);
+
+  const grantFaceProcessingConsent = useCallback(
+    (alsoGrantCalibrationStorage = false, trigger: ConsentTrigger = 'consent_modal') => {
+      const uid = authRef.current.userId;
+      if (!uid || authRef.current.accountType !== 'impaired') return;
+      let nextState = grantConsent(uid, 'face_processing', trigger);
+      if (alsoGrantCalibrationStorage) {
+        nextState = grantConsent(uid, 'calibration_storage', trigger);
+      }
+      setConsentState(nextState);
+      setConsentLogs(getConsentLogs(uid));
+      setConsentModalOpen(false);
+
+      if (pendingCameraStartAfterConsentRef.current || trigger === 'consent_modal') {
+        pendingCameraStartAfterConsentRef.current = false;
+        localStorage.setItem('luckydream_eye_enabled', 'true');
+        setSettings(prev => ({ ...prev, eyeControlEnabled: true }));
+      }
+    },
+    []
+  );
+
+  const revokeFaceProcessingConsent = useCallback(
+    (trigger: ConsentTrigger = 'privacy_dashboard') => {
+      const uid = authRef.current.userId;
+      teardownTrackingSession();
+      if (uid) {
+        const nextState = revokeConsent(uid, 'face_processing', trigger);
+        setConsentState(nextState);
+        setConsentLogs(getConsentLogs(uid));
+      }
+      localStorage.setItem('luckydream_eye_enabled', 'false');
+      setSettings(prev => ({ ...prev, eyeControlEnabled: false }));
+    },
+    [teardownTrackingSession]
+  );
+
+  const grantCalibrationStorageConsent = useCallback(
+    (trigger: ConsentTrigger = 'privacy_dashboard') => {
+      const uid = authRef.current.userId;
+      if (!uid) return;
+      const nextState = grantConsent(uid, 'calibration_storage', trigger);
+      setConsentState(nextState);
+      setConsentLogs(getConsentLogs(uid));
+      // Do not automatically write defaults until user calibrates/re-zeros
+      setPersistedCalibrationProfile(readPersistedCalibrationProfile(uid));
+    },
+    []
+  );
+
+  const revokeCalibrationStorageConsent = useCallback(
+    (trigger: ConsentTrigger = 'privacy_dashboard') => {
+      const uid = authRef.current.userId;
+      if (!uid) return;
+      const nextState = revokeConsent(uid, 'calibration_storage', trigger);
+      deleteCalibrationProfile(uid);
+      setConsentState(nextState);
+      setConsentLogs(getConsentLogs(uid));
+      setPersistedCalibrationProfile(null);
+    },
+    []
+  );
+
+  const deleteCalibrationData = useCallback(() => {
+    const uid = authRef.current.userId;
+    deleteCalibrationProfile(uid);
+    setPersistedCalibrationProfile(null);
+    initFramesCount.current = 0;
+    neutralRunningX.current = 0;
+    neutralRunningY.current = 0;
+    smoothGazeX.current = 0;
+    smoothGazeY.current = 0;
+    gazeDirState.current = 'CENTER';
+    setCalibration({ ...DEFAULT_CALIBRATION_DATA });
+    if (uid) {
+      appendConsentLog(uid, {
+        consentType: 'calibration_storage',
+        action: 'DATA_DELETED',
+        trigger: 'privacy_dashboard',
+      });
+      setConsentLogs(getConsentLogs(uid));
+    }
+    setCalibrationMessage('Đã xóa dữ liệu hiệu chỉnh.');
+  }, []);
+
+  const deleteAllLocalEyeData = useCallback(() => {
+    const uid = authRef.current.userId;
+    teardownTrackingSession();
+    clearUserEyeControlLocalData(uid);
+    setConsentState(createEmptyConsentState(uid));
+    setConsentLogs([]);
+    setPersistedCalibrationProfile(null);
+    setCalibration({ ...DEFAULT_CALIBRATION_DATA });
+    setSettings(prev => ({ ...prev, eyeControlEnabled: false }));
+  }, [teardownTrackingSession]);
 
   const setSimulatorMode = useCallback((enabled: boolean) => {
     setSettings(prev => ({ ...prev, simulatorMode: enabled }));
@@ -2056,9 +2586,7 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     if (!enabled) {
       lowLightProcessorRef.current?.reset();
       processedCanvasRef.current = null;
-      if (typeof window !== 'undefined') {
-        delete (window as any).__eyeai_lowlight_stats;
-      }
+      setEphemeralLowLightStats(sessionTokenRef.current, null);
     }
     setSettings(prev => ({ ...prev, lowLightFilterEnabled: enabled }));
   }, []);
@@ -2100,6 +2628,21 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     triggerManualAction,
     isVisualizerOpen,
     setVisualizerOpen,
+    consentState,
+    consentLogs,
+    isConsentModalOpen,
+    openConsentModal,
+    closeConsentModal,
+    grantFaceProcessingConsent,
+    revokeFaceProcessingConsent,
+    grantCalibrationStorageConsent,
+    revokeCalibrationStorageConsent,
+    deleteCalibrationData,
+    deleteAllLocalEyeData,
+    persistedCalibrationProfile,
+    calibrationRetentionDays: DEFAULT_CALIBRATION_RETENTION_DAYS,
+    activeSessionId,
+    privacyPolicyVersion: PRIVACY_POLICY_VERSION,
   }), [
     settings,
     calibration,
@@ -2131,6 +2674,19 @@ export function EyeTrackingProvider({ children }: { children: ReactNode }) {
     triggerManualAction,
     isVisualizerOpen,
     setVisualizerOpen,
+    consentState,
+    consentLogs,
+    isConsentModalOpen,
+    openConsentModal,
+    closeConsentModal,
+    grantFaceProcessingConsent,
+    revokeFaceProcessingConsent,
+    grantCalibrationStorageConsent,
+    revokeCalibrationStorageConsent,
+    deleteCalibrationData,
+    deleteAllLocalEyeData,
+    persistedCalibrationProfile,
+    activeSessionId,
   ]);
 
   // Throttled Telemetry Context Value

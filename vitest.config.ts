@@ -13,7 +13,14 @@ export default defineConfig({
     environment: 'jsdom',
     globals: false,
     setupFiles: ['./src/experiences/patient/voice-agent/tests/setup.ts'],
-    include: ['src/experiences/patient/**/*.test.ts', 'src/experiences/patient/**/*.test.tsx'],
+    include: [
+      'src/experiences/patient/**/*.test.ts',
+      'src/experiences/patient/**/*.test.tsx',
+      'src/modules/eye-control/**/*.test.ts',
+      'src/modules/eye-control/**/*.test.tsx',
+      'src/components/**/*.test.ts',
+      'src/components/**/*.test.tsx',
+    ],
     exclude: ['node_modules', 'dist', 'Y-T-AUTO-master'],
   },
 });

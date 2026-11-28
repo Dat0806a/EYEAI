@@ -288,7 +288,13 @@ export function HumanChatPage({ friend, onBack }: HumanChatPageProps) {
       </main>
 
       {/* Bottom Composer Bar Container */}
-      <div className={`fixed bottom-0 left-0 right-0 z-30 p-2 md:p-3 bg-[#FFF2D6] border-t border-[#14213D]/10 shadow-lg transition-all duration-200 ${isKeyboardOpen ? 'pb-[225px] sm:pb-[255px]' : 'pb-2'}`}>
+      <div
+        className="fixed left-0 right-0 z-30 px-2 py-2 md:px-3 md:py-2.5 bg-[#FFF2D6] border-t border-[#14213D]/10 shadow-lg transition-[bottom] duration-200"
+        style={{
+          bottom: isKeyboardOpen ? 'var(--virtual-keyboard-height, 245px)' : '0px',
+          paddingBottom: isKeyboardOpen ? undefined : 'max(8px, env(safe-area-inset-bottom))',
+        }}
+      >
         <div className="max-w-md md:max-w-xl mx-auto w-full">
           {eyeControlEnabled ? (
             <EyeTextComposer

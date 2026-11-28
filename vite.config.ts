@@ -6,11 +6,7 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
-    envPrefix: ['VITE_', 'GEMINI_', 'YOUTUBE_'],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || ''),
-      'process.env.YOUTUBE_API_KEY': JSON.stringify(process.env.YOUTUBE_API_KEY || process.env.VITE_YOUTUBE_API_KEY || ''),
-    },
+    envPrefix: 'VITE_',
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

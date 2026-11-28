@@ -18,6 +18,14 @@ import { EyeNavigationProvider, useEyeNavigationContext } from '../EyeNavigation
 import { useEyeTrackingSettings } from '../useEyeTracking';
 import { CameraHub } from '../CameraHub';
 import { CameraPreview } from '../CameraPreview';
+import { grantConsent } from '../../privacy/consentService';
+
+const TEST_IMPAIRED_AUTH = {
+  isAuthenticated: true,
+  loading: false,
+  userId: 'test-impaired-user',
+  accountType: 'impaired' as const,
+};
 
 // Mock speech module so jsdom doesn't touch AudioContext/speechSynthesis
 vi.mock('../../../utils/speech', () => ({
@@ -257,6 +265,7 @@ describe('EyeTrackingProvider & CameraHub - Integration & Regression Tests', () 
 
   beforeEach(() => {
     localStorage.clear();
+    grantConsent(TEST_IMPAIRED_AUTH.userId, 'face_processing', 'consent_modal');
     rafQueue = [];
     sendMock = vi.fn().mockResolvedValue(undefined);
     onResultsCb = null;
@@ -291,13 +300,13 @@ describe('EyeTrackingProvider & CameraHub - Integration & Regression Tests', () 
     });
 
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
-    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => { });
 
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb: FrameRequestCallback) => {
       rafQueue.push(cb);
       return rafIdCounter++;
     });
-    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => { });
   });
 
   afterEach(() => {
@@ -356,7 +365,7 @@ describe('EyeTrackingProvider & CameraHub - Integration & Regression Tests', () 
     const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => fakeNow);
 
     render(
-      <EyeTrackingProvider>
+      <EyeTrackingProvider auth={TEST_IMPAIRED_AUTH}>
         <EyeNavigationProvider>
           <Harness />
         </EyeNavigationProvider>
@@ -420,7 +429,7 @@ describe('EyeTrackingProvider & CameraHub - Integration & Regression Tests', () 
     });
 
     const { container } = render(
-      <EyeTrackingProvider>
+      <EyeTrackingProvider auth={TEST_IMPAIRED_AUTH}>
         <EyeNavigationProvider>
           <Harness />
         </EyeNavigationProvider>

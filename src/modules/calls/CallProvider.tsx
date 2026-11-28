@@ -7,6 +7,7 @@ import { WebRTCService } from './webrtcService';
 import { CallType, CallStatus, SignalingPayload, CallSession } from '../../types/chat';
 import { AppButton } from '../../components/ui/AppButton';
 import { speakVietnamese } from '../../utils/speech';
+import { isDevicePermissionEnabled } from '../permissions/devicePermissions';
 import { Phone, PhoneOff, Video, Mic, MicOff, VideoOff, Volume2, User, AlertTriangle } from 'lucide-react';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -28,7 +29,7 @@ interface CallContextType {
 const CallContext = createContext<CallContextType | undefined>(undefined);
 
 export function CallProvider({ children }: { children: ReactNode }) {
-  const { user, profile } = useAuth();
+  const { user, profile, mfaSatisfied } = useAuth();
   const { settings } = useEyeTrackingSettings(); // Access Eye Tracking cameraStream
 
   const [callSession, setCallSession] = useState<CallSession | null>(null);
@@ -160,9 +161,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Global Signaling Listener for Current User (Incoming ring notification)
+  // Global Signaling Listener for Current User (Incoming ring notification) - gated by mfaSatisfied
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId || !mfaSatisfied) return;
 
     const channel = signalingService.subscribeToUserSignaling(currentUserId, async payload => {
       if (payload.type === 'call:ring') {
@@ -203,7 +204,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUserId]);
+  }, [currentUserId, mfaSatisfied]);
 
   /**
    * Start 20s Connection Timeout Safety Gate
@@ -228,18 +229,23 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const tracks: MediaStreamTrack[] = [];
     const callTracksToStop: MediaStreamTrack[] = [];
 
-    // Microphone Track
-    try {
-      console.log('[CALL][MEDIA] Requesting microphone access...');
-      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      const audioTrack = audioStream.getAudioTracks()[0];
-      if (audioTrack) {
-        tracks.push(audioTrack);
-        callTracksToStop.push(audioTrack);
-        console.log('[CALL][MEDIA] Microphone track acquired:', audioTrack.label);
+    // Microphone Track (respect user device permission toggle)
+    if (!isDevicePermissionEnabled('microphone', currentUserId)) {
+      console.warn('[CALL][MEDIA] Microphone disabled in device permission settings.');
+      speakVietnamese('Quyền Micro đang tắt trong cài đặt');
+    } else {
+      try {
+        console.log('[CALL][MEDIA] Requesting microphone access...');
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const audioTrack = audioStream.getAudioTracks()[0];
+        if (audioTrack) {
+          tracks.push(audioTrack);
+          callTracksToStop.push(audioTrack);
+          console.log('[CALL][MEDIA] Microphone track acquired:', audioTrack.label);
+        }
+      } catch (e) {
+        console.warn('[CALL][MEDIA] Microphone access failed or denied:', e);
       }
-    } catch (e) {
-      console.warn('[CALL][MEDIA] Microphone access failed or denied:', e);
     }
 
     callTracksToStopRef.current = callTracksToStop;

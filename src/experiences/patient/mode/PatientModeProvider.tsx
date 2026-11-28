@@ -35,9 +35,16 @@ export function PatientModeProvider({
     featureEnabled ? null : 'default'
   );
 
-  // Reset mode whenever user logs out, switches accounts, or account_type is not patient
+  const prevUserIdRef = React.useRef<string | null>(userId);
+
+  // Reset mode only when user logs out, switches to a different user, or account_type is not patient
   useEffect(() => {
-    if (!isAuthenticated || accountType !== 'patient' || !userId) {
+    const prevUserId = prevUserIdRef.current;
+    prevUserIdRef.current = userId;
+
+    if ((!isAuthenticated && !userId) || (accountType && accountType !== 'patient')) {
+      setMode(featureEnabled ? null : 'default');
+    } else if (userId && prevUserId && userId !== prevUserId) {
       setMode(featureEnabled ? null : 'default');
     } else if (!featureEnabled) {
       setMode('default');

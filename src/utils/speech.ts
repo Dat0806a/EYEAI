@@ -23,7 +23,19 @@ let sharedAudioElement: HTMLAudioElement | null = null;
 let globalAudioContext: AudioContext | null = null;
 let currentAudioSource: AudioBufferSourceNode | null = null;
 let currentFetchController: AbortController | null = null;
+let currentAudioObjectUrl: string | null = null;
 let isPlayingAudio = false;
+
+function revokeCurrentAudioObjectUrl() {
+  if (currentAudioObjectUrl) {
+    try {
+      URL.revokeObjectURL(currentAudioObjectUrl);
+    } catch {
+      // ignore
+    }
+    currentAudioObjectUrl = null;
+  }
+}
 let cachedVoices: SpeechSynthesisVoice[] = [];
 let currentPlaybackSession = 0;
 
@@ -362,15 +374,17 @@ export function stopSpeech() {
     currentAudioSource = null;
   }
 
-  // Pause HTMLAudioElement
+  // Pause HTMLAudioElement and release any temporary Object URL
   if (sharedAudioElement) {
     try {
       sharedAudioElement.pause();
       sharedAudioElement.currentTime = 0;
+      sharedAudioElement.removeAttribute('src');
     } catch {
       // ignore
     }
   }
+  revokeCurrentAudioObjectUrl();
 
   // Cancel Web Speech API only when active or pending to avoid Chromium/WebKit async cancel collision
   if ('speechSynthesis' in window) {
@@ -556,8 +570,6 @@ async function playSingleChunkOnline(
 ): Promise<void> {
   if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
 
-  const encoded = encodeURIComponent(chunk);
-
   // Strategy 1: Check in-memory AudioBuffer cache (0ms instant playback for UI feedback)
   const cachedBuf = audioBufferCache.get(chunk);
   const ctx = getGlobalAudioContext();
@@ -573,14 +585,17 @@ async function playSingleChunkOnline(
     }
   }
 
-  // Strategy 2: Serverless /api/tts + Web Audio API
+  // Strategy 2: Serverless POST /api/tts + Web Audio API (avoids putting spoken text in URL query)
   if (ctx) {
     try {
-      const ttsUrl = `/api/tts?text=${encoded}`;
-
       // Create AbortController to cancel this request if user triggers a new action
       currentFetchController = new AbortController();
-      const response = await fetch(ttsUrl, { signal: currentFetchController.signal });
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: chunk.slice(0, 250) }),
+        signal: currentFetchController.signal,
+      });
       currentFetchController = null;
 
       const contentType = (response.headers.get('content-type') || '').toLowerCase();
@@ -618,15 +633,40 @@ async function playSingleChunkOnline(
     }
   }
 
-  // Strategy 3: Serverless /api/tts via HTMLAudioElement fallback
+  // Strategy 3: Serverless POST /api/tts via Object URL + HTMLAudioElement fallback
   const audio = getSharedAudioElement();
   if (audio) {
+    let objectUrl: string | null = null;
     try {
+      currentFetchController = new AbortController();
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: chunk.slice(0, 250) }),
+        signal: currentFetchController.signal,
+      });
+      currentFetchController = null;
+
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      if (
+        !response.ok ||
+        contentType.includes('text/html') ||
+        contentType.includes('text/plain') ||
+        (!contentType.includes('audio') && !contentType.includes('octet-stream'))
+      ) {
+        return;
+      }
+      if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
+
+      const audioBlob = await response.blob();
+      if (!isPlayingAudio || sessionId !== currentPlaybackSession) return;
+
+      objectUrl = URL.createObjectURL(audioBlob);
+      revokeCurrentAudioObjectUrl();
+      currentAudioObjectUrl = objectUrl;
+
       audio.playbackRate = rate;
       audio.volume = volume;
-
-      // Primary fallback: Netlify /api/tts serverless function (safe proxy, no CORS/Referrer issues)
-      const ttsProxyUrl = `/api/tts?text=${encoded}`;
 
       await new Promise<void>((resolve, reject) => {
         let finished = false;
@@ -635,6 +675,15 @@ async function playSingleChunkOnline(
           finished = true;
           audio.onended = null;
           audio.onerror = null;
+          if (currentAudioObjectUrl === objectUrl) {
+            revokeCurrentAudioObjectUrl();
+          } else if (objectUrl) {
+            try {
+              URL.revokeObjectURL(objectUrl);
+            } catch {
+              // ignore
+            }
+          }
         };
 
         audio.onended = () => {
@@ -647,7 +696,7 @@ async function playSingleChunkOnline(
           reject(e);
         };
 
-        audio.src = ttsProxyUrl;
+        audio.src = objectUrl!;
         const playPromise = audio.play();
         if (playPromise !== undefined) {
           playPromise.catch((err) => {
@@ -660,7 +709,14 @@ async function playSingleChunkOnline(
       });
       return;
     } catch {
-      // end
+      if (objectUrl && currentAudioObjectUrl !== objectUrl) {
+        try {
+          URL.revokeObjectURL(objectUrl);
+        } catch {
+          // ignore
+        }
+      }
+      revokeCurrentAudioObjectUrl();
     }
   }
 }

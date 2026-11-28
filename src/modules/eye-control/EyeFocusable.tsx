@@ -150,9 +150,8 @@ export const EyeFocusable = memo(function EyeFocusable({
       tabIndex={0}
       onClick={handleSelect}
       onFocus={() => setFocusId(id)}
-      className={`relative transition-all duration-180 cursor-pointer select-none scroll-my-6 ${
-        isFocused ? 'scale-[1.045] z-30 brightness-[1.04]' : ''
-      } ${isSelecting ? 'scale-[0.965] brightness-115' : ''} ${className}`}
+      className={`relative transition-all duration-180 cursor-pointer select-none scroll-my-6 ${isFocused ? 'scale-[1.045] z-30 brightness-[1.04]' : ''
+        } ${isSelecting ? 'scale-[0.965] brightness-115' : ''} ${className}`}
     >
       {children}
 

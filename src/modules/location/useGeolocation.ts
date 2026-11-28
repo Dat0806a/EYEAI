@@ -1,4 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  DEVICE_PERMISSIONS_CHANGED_EVENT,
+  isDevicePermissionEnabled,
+} from '../permissions/devicePermissions';
 
 export type GeolocationStatus =
   | 'REQUESTING_PERMISSION'
@@ -40,6 +44,20 @@ export function useGeolocation(enableWatch: boolean = false) {
   const watchIdRef = useRef<number | null>(null);
 
   const requestLocation = useCallback(() => {
+    if (!isDevicePermissionEnabled('geolocation')) {
+      if (watchIdRef.current !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      setState((prev) => ({
+        ...prev,
+        status: 'PERMISSION_DENIED',
+        errorMessage: 'Quyền vị trí (GPS) đang được tắt trong cài đặt.',
+        isRealGps: false,
+      }));
+      return;
+    }
+
     if (!navigator.geolocation) {
       setState({
         status: 'UNAVAILABLE',
@@ -134,7 +152,13 @@ export function useGeolocation(enableWatch: boolean = false) {
   useEffect(() => {
     requestLocation();
 
+    const handlePermissionChange = () => {
+      requestLocation();
+    };
+    window.addEventListener(DEVICE_PERMISSIONS_CHANGED_EVENT, handlePermissionChange);
+
     return () => {
+      window.removeEventListener(DEVICE_PERMISSIONS_CHANGED_EVENT, handlePermissionChange);
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;

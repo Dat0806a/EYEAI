@@ -1,14 +1,31 @@
 import { supabase } from '../lib/supabase';
+import { ApiAuthError, buildAuthHeaders, throwIfAuthRejected } from '../lib/authHeaders';
 import {
   AnalysisBundle,
   ConfirmedLabResult,
   HistoryReport,
+  OcrDocumentStatus,
   OcrResultItem,
   OcrScanResponse,
 } from '../types/patient';
 import { parseOcrText } from './patientOcrNormalizer';
 import { buildCompleteBundle, classifyResult } from './patientAnalysisService';
-import { GoogleGenAI } from '@google/genai';
+
+export const DEFAULT_INVALID_IMAGE_ERROR =
+  'Hình ảnh không hợp lệ. Ảnh tải lên không phải phiếu khám bệnh hoặc không chứa chỉ số xét nghiệm y khoa.';
+
+export class InvalidMedicalImageError extends Error {
+  public readonly documentStatus: OcrDocumentStatus = 'UNKNOWN';
+  public readonly status: OcrDocumentStatus = 'UNKNOWN';
+  public readonly errorCode = 'INVALID_MEDICAL_IMAGE' as const;
+  public readonly detectedSubject: string | null;
+
+  constructor(message: string = DEFAULT_INVALID_IMAGE_ERROR, detectedSubject: string | null = null) {
+    super(message);
+    this.name = 'InvalidMedicalImageError';
+    this.detectedSubject = detectedSubject;
+  }
+}
 
 const LEGACY_STORAGE_KEY_REPORTS = 'eyetalk_patient_reports';
 const LEGACY_STORAGE_KEY_BUNDLES_PREFIX = 'eyetalk_patient_bundles';
@@ -102,23 +119,6 @@ function saveLocalBundle(reportId: string, bundle: AnalysisBundle, userId: strin
   }
 }
 
-const CLIENT_MODELS_TO_TRY = [
-  'gemini-3.5-flash',
-  'gemini-3.5-flash-lite',
-  'gemini-flash-lite-latest',
-  'gemini-3.8-flash',
-];
-
-function getClientGeminiApiKey(): string {
-  const env = import.meta.env;
-  return (
-    env?.VITE_GEMINI_API_KEY ||
-    env?.GEMINI_API_KEY ||
-    (typeof process !== 'undefined' ? (process.env?.GEMINI_API_KEY || process.env?.VITE_GEMINI_API_KEY) : '') ||
-    ''
-  ).trim();
-}
-
 /**
  * Resizes image client-side if it exceeds max dimension (e.g. mobile photo > 2048px)
  * Keeps file size optimal for fast OCR and avoids Netlify 6MB serverless payload limit
@@ -183,155 +183,9 @@ async function fileToBase64(file: File): Promise<string> {
   });
 }
 
-const OCR_PROMPT = `Bạn là hệ thống Vision OCR y tế chuyên nghiệp hàng đầu.
-Nhiệm vụ của bạn là đọc phiếu kết quả xét nghiệm y tế và trích xuất TOÀN BỘ các chỉ số xét nghiệm xuất hiện trên phiếu thành định dạng JSON có cấu trúc.
-
-CÁC NGUYÊN TẮC BẮT BUỘC:
-1. TRÍCH XUẤT ĐỘNG KHÔNG GIỚI HẠN:
-   - Trích xuất TOÀN BỘ mọi chỉ số xuất hiện trên phiếu (Huyết học, Sinh hóa máu, Miễn dịch, Nước tiểu, Vi sinh, v.v.).
-   - Tuyệt đối KHÔNG giới hạn hay loại bỏ bất kỳ chỉ số nào.
-2. TRUNG THỰC - TUYỆT ĐỐI KHÔNG BỊA ĐẶT:
-   - Chỉ trích xuất thông tin THỰC SỰ CÓ TRÊN PHIẾU. Tuyệt đối không tự suy diễn hoặc thêm các chỉ số không xuất hiện trong tài liệu.
-3. ĐÁNH DẤU CHỈ SỐ KHÔNG CHẮC CHẮN ĐỂ NGƯỜI DÙNG RÀ SOÁT:
-   - Nếu bất kỳ trường nào bị mờ, khó đọc, nếp gấp, hoặc không thể khẳng định 100% chính xác:
-     * Đặt "isUncertain": true
-     * Đặt "ocrConfidence" < 0.70 (ví dụ 0.5 - 0.65)
-     * Ghi rõ lý do vào trường "note" (ví dụ: "Số liệu bị mờ phần thập phân, vui lòng đối chiếu lại")
-   - Nếu rõ ràng, sắc nét:
-     * Đặt "isUncertain": false
-     * Đặt "ocrConfidence": >= 0.90
-4. GIÁ TRỊ ĐỊNH LƯỢNG VÀ ĐỊNH TÍNH:
-   - Với chỉ số có giá trị số (ví dụ: 7.2; 112; 4.5): "value": 7.2, "valueType": "NUMERIC".
-   - Với chỉ số định tính (ví dụ: "Âm tính", "Dương tính", "Vàng trong", "Không tìm thấy"): "value": "Âm tính", "valueType": "QUALITATIVE".
-5. KHOẢNG THAM CHIẾU NGUYÊN GỐC:
-   - Trích xuất chính xác khoảng tham chiếu (Reference Range) ĐƯỢC IN TRÊN PHIẾU.
-   - "referenceRange": {
-       "low": số cận dưới (hoặc null nếu không có),
-       "high": số cận trên (hoặc null nếu không có),
-       "text": "chuỗi tham chiếu nguyên gốc in trên phiếu" (hoặc null nếu không in)
-     }
-   - KHÔNG tự đặt ngưỡng tham chiếu nếu phiếu không có. Để null nếu phiếu không in.
-6. PHÂN LOẠI TRẠNG THÁI SƠ BỘ ("flag"):
-   - "NORMAL": nếu giá trị nằm trong khoảng tham chiếu trên phiếu.
-   - "LOW": nếu giá trị thấp hơn cận dưới trên phiếu.
-   - "HIGH": nếu giá trị cao hơn cận trên trên phiếu.
-   - "ABNORMAL": nếu là kết quả định tính bất thường (ví dụ: Dương tính ở xét nghiệm vi khuẩn/virus).
-   - "UNCERTAIN": nếu số liệu bị mờ hoặc nghi ngờ.
-   - "UNKNOWN": nếu phiếu không in khoảng tham chiếu để so sánh.
-
-HÃY TRẢ VỀ DUY NHẤT MỘT ĐỐI TƯỢNG JSON VỚI CẤU TRÚC SAU:
-{
-  "hospitalOrLabName": "Tên cơ sở y tế (nếu đọc được, không có thì null)",
-  "patientName": "Tên bệnh nhân (nếu đọc được, không có thì null)",
-  "sampleDate": "Ngày lấy mẫu/xét nghiệm (nếu đọc được, không có thì null)",
-  "results": [
-    {
-      "testCode": "MÃ CHỈ SỐ (viết hoa, ví dụ: WBC, RBC, HGB, GLUCOSE, SGOT, ALT, URIC_ACID...)",
-      "testName": "Tên chỉ số xét nghiệm (ví dụ: Số lượng bạch cầu, Đường huyết...)",
-      "value": 7.2,
-      "valueType": "NUMERIC",
-      "unit": "10^9/L",
-      "referenceRange": {
-        "low": 4.0,
-        "high": 10.0,
-        "text": "4.0 - 10.0"
-      },
-      "ocrConfidence": 0.95,
-      "isUncertain": false,
-      "flag": "NORMAL",
-      "note": null
-    }
-  ]
-}`;
-
 /**
- * Direct client-side Gemini Vision OCR execution
- * Runs when backend serverless endpoint is 404 or unreachable
- */
-async function performClientVisionOcr(
-  fileBase64: string,
-  mimeType: string
-): Promise<Partial<OcrScanResponse> | null> {
-  const apiKey = getClientGeminiApiKey();
-  if (!apiKey) {
-    throw new Error('Chưa cấu hình API Key cho dịch vụ Gemini AI.');
-  }
-
-  const rawBase64 = fileBase64.replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
-  const cleanMime = (mimeType || '').toLowerCase().trim();
-
-  let contents: any[] = [];
-  if (cleanMime === 'text/plain') {
-    const textContent = atob(rawBase64);
-    contents = [{ text: `${OCR_PROMPT}\n\nNỘI DUNG PHIẾU XÉT NGHIỆM DẠNG VĂN BẢN:\n${textContent}` }];
-  } else {
-    const standardMime = cleanMime.includes('pdf')
-      ? 'application/pdf'
-      : cleanMime.includes('png')
-      ? 'image/png'
-      : cleanMime.includes('webp')
-      ? 'image/webp'
-      : 'image/jpeg';
-    contents = [
-      { text: OCR_PROMPT },
-      {
-        inlineData: {
-          data: rawBase64,
-          mimeType: standardMime,
-        },
-      },
-    ];
-  }
-
-  const ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
-
-  let lastError: any = null;
-  for (const model of CLIENT_MODELS_TO_TRY) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
-
-      if (response && response.text) {
-        let cleaned = response.text.trim();
-        if (cleaned.startsWith('```json')) {
-          cleaned = cleaned.replace(/^```json/, '').replace(/```$/, '').trim();
-        } else if (cleaned.startsWith('```')) {
-          cleaned = cleaned.replace(/^```/, '').replace(/```$/, '').trim();
-        }
-        const parsed = JSON.parse(cleaned);
-        const results: OcrResultItem[] = Array.isArray(parsed.results) ? parsed.results : [];
-        return {
-          results,
-          hospitalOrLabName: parsed.hospitalOrLabName || null,
-          patientName: parsed.patientName || null,
-          sampleDate: parsed.sampleDate || null,
-          provider: `GEMINI_VISION (${model})`,
-        };
-      }
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`[PATIENT-CLIENT-OCR] Model ${model} failed:`, err?.message || err);
-    }
-  }
-
-  throw new Error(lastError?.message || 'Không thể nhận diện hình ảnh qua dịch vụ Gemini Vision.');
-}
-
-/**
- * Scan lab report file (Image, PDF, or Text) via real Gemini Vision OCR API
- * With automatic dynamic schema extraction and graceful local fallback
+ * Scan lab report file (Image, PDF, or Text) via Backend Gemini Vision OCR API (/api/patient/ocr)
+ * Supports local text parser for .txt files without exposing any API secrets to the browser.
  */
 export async function scanOcr(file: File): Promise<OcrScanResponse> {
   const reportId = 'rep_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
@@ -340,6 +194,7 @@ export async function scanOcr(file: File): Promise<OcrScanResponse> {
   let hospitalOrLabName: string | null = null;
   let patientName: string | null = null;
   let sampleDate: string | null = null;
+  let detectedSubject: string | null = null;
 
   // 1. Convert file to base64 for API delivery
   const fileBase64 = await fileToBase64(file);
@@ -348,9 +203,10 @@ export async function scanOcr(file: File): Promise<OcrScanResponse> {
   // 2. Try calling backend Patient OCR endpoint first
   let serverSucceeded = false;
   try {
+    const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch('/api/patient/ocr', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         fileBase64,
         mimeType,
@@ -358,58 +214,81 @@ export async function scanOcr(file: File): Promise<OcrScanResponse> {
       }),
     });
 
+    await throwIfAuthRejected(res);
+
     const contentType = res.headers.get('content-type') || '';
-    if (res.ok && contentType.includes('application/json')) {
+    if (contentType.includes('application/json')) {
       const data = await res.json();
-      if (Array.isArray(data.results) && data.results.length > 0) {
-        results = data.results;
-        provider = data.provider || 'GEMINI_VISION';
-        hospitalOrLabName = data.hospitalOrLabName || null;
-        patientName = data.patientName || null;
-        sampleDate = data.sampleDate || null;
-        serverSucceeded = true;
+      const rawDocStatus =
+        typeof data?.documentStatus === 'string' ? data.documentStatus.trim().toUpperCase() : '';
+      const rawStatus = typeof data?.status === 'string' ? data.status.trim().toUpperCase() : '';
+      const isRejectedAsInvalidImage =
+        res.status === 422 ||
+        rawDocStatus === 'UNKNOWN' ||
+        rawDocStatus === 'UNKNOW' ||
+        rawStatus === 'UNKNOWN' ||
+        rawStatus === 'UNKNOW' ||
+        data?.isValidMedicalDocument === false ||
+        data?.errorCode === 'INVALID_MEDICAL_IMAGE';
+
+      if (isRejectedAsInvalidImage) {
+        throw new InvalidMedicalImageError(
+          data?.error || DEFAULT_INVALID_IMAGE_ERROR,
+          data?.detectedSubject || null
+        );
       }
+
+      if (res.ok) {
+        if (Array.isArray(data.results) && data.results.length > 0) {
+          results = data.results;
+          provider = data.provider || 'GEMINI_VISION';
+          hospitalOrLabName = data.hospitalOrLabName || null;
+          patientName = data.patientName || null;
+          sampleDate = data.sampleDate || null;
+          detectedSubject = data.detectedSubject || null;
+          serverSucceeded = true;
+        } else {
+          throw new InvalidMedicalImageError(
+            data?.error || DEFAULT_INVALID_IMAGE_ERROR,
+            data?.detectedSubject || null
+          );
+        }
+      } else if (res.status === 429) {
+        throw new Error('Dịch vụ Gemini đang quá tải lượt gọi (429). Vui lòng đợi 30 giây rồi thử lại.');
+      } else {
+        console.warn(`[PATIENT-SERVICE] Server /api/patient/ocr returned ${res.status}.`);
+      }
+    } else if (res.status === 429) {
+      throw new Error('Dịch vụ Gemini đang quá tải lượt gọi (429). Vui lòng đợi 30 giây rồi thử lại.');
     } else {
-      console.warn(`[PATIENT-SERVICE] Server /api/patient/ocr returned ${res.status}. Switching to direct client OCR.`);
+      console.warn(`[PATIENT-SERVICE] Server /api/patient/ocr returned ${res.status}.`);
     }
   } catch (apiErr: any) {
-    console.warn('[PATIENT-SERVICE] Server Vision OCR unreachable, switching to direct client OCR:', apiErr);
+    if (apiErr instanceof ApiAuthError || apiErr instanceof InvalidMedicalImageError) {
+      throw apiErr;
+    }
+    if (apiErr?.message?.includes('429')) {
+      throw apiErr;
+    }
+    console.warn('[PATIENT-SERVICE] Server Vision OCR unreachable:', apiErr);
   }
 
-  // 3. Fallback to direct client-side Gemini Vision OCR if backend failed, returned 404, or had empty results
+  // 3. Offline local text parser fallback (.txt only) — NEVER calls direct client Gemini
   if (!serverSucceeded || results.length === 0) {
     if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
       const rawText = await file.text();
       results = parseOcrText(rawText);
       provider = 'LOCAL_TEXT_PARSER';
     } else {
-      try {
-        const clientRes = await performClientVisionOcr(fileBase64, mimeType);
-        if (clientRes && Array.isArray(clientRes.results) && clientRes.results.length > 0) {
-          results = clientRes.results;
-          provider = clientRes.provider || 'GEMINI_VISION_DIRECT';
-          hospitalOrLabName = clientRes.hospitalOrLabName || null;
-          patientName = clientRes.patientName || null;
-          sampleDate = clientRes.sampleDate || null;
-        }
-      } catch (clientErr: any) {
-        console.error('[PATIENT-SERVICE] Client Vision OCR error:', clientErr);
-        const msg = clientErr?.message || '';
-        if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('429')) {
-          throw new Error('Dịch vụ Gemini đang quá tải lượt gọi (429). Vui lòng đợi 30 giây rồi thử lại.');
-        }
-        throw new Error(
-          'Không thể nhận diện được chỉ số xét nghiệm từ hình ảnh tải lên. Vui lòng kiểm tra độ sáng, góc chụp và chụp lại rõ nét hơn.'
-        );
-      }
+      throw new Error(
+        'Không thể kết nối dịch vụ phân tích phiếu xét nghiệm trên máy chủ. Vui lòng kiểm tra kết nối và thử lại.'
+      );
     }
   }
 
   // 4. Validate results
   if (results.length === 0) {
-    throw new Error(
-      'Không thể nhận diện được chỉ số xét nghiệm từ hình ảnh tải lên. Vui lòng kiểm tra ảnh rõ nét và chụp đúng phiếu kết quả xét nghiệm.'
-    );
+    throw new InvalidMedicalImageError(DEFAULT_INVALID_IMAGE_ERROR);
   }
 
   // 5. Create and persist initial report metadata scoped to authenticated patient
@@ -443,6 +322,9 @@ export async function scanOcr(file: File): Promise<OcrScanResponse> {
   return {
     reportId,
     provider,
+    documentStatus: 'VALID',
+    isValidMedicalDocument: true,
+    detectedSubject,
     results,
     hospitalOrLabName,
     patientName,
@@ -451,136 +333,8 @@ export async function scanOcr(file: File): Promise<OcrScanResponse> {
 }
 
 /**
- * Direct client-side Gemini Lab Analysis execution
- */
-async function performClientAnalysis(
-  reportId: string,
-  confirmedResults: ConfirmedLabResult[],
-  age: number
-): Promise<AnalysisBundle | null> {
-  const apiKey = getClientGeminiApiKey();
-  if (!apiKey) return null;
-
-  try {
-    const prompt = `Bạn là Chuyên gia Y tế & Dinh dưỡng tư vấn giải thích kết quả xét nghiệm y khoa.
-Dưới đây là danh sách kết quả xét nghiệm đã được người dùng rà soát và xác nhận:
-Độ tuổi bệnh nhân: ${age} tuổi.
-Danh sách chỉ số:
-${JSON.stringify(confirmedResults, null, 2)}
-
-NGUYÊN TẮC AN TOÀN Y TẾ & KIỂM CHỨNG:
-1. KHÔNG TỰ ĐẶT NGƯỠNG HOẶC CHẨN ĐOÁN BỆNH:
-   - Bạn chỉ đóng vai trò người giải thích thông tin tham khảo. Tuyệt đối KHÔNG khẳng định chẩn đoán bệnh tật hoặc kê đơn thuốc.
-   - Nhận xét từng chỉ số PHẢI DỰA TRÊN KHOẢNG THAM CHIẾU ĐÃ GHI TRÊN PHIẾU (referenceText / referenceLow / referenceHigh).
-   - Nếu chỉ số không có khoảng tham chiếu, giải thích ý nghĩa sinh lý thông thường và khuyên hỏi bác sĩ chỉ định.
-2. CÓ NGUỒN KIỂM CHỨNG/CĂN CỨ Y KHOA:
-   - Trong mỗi chỉ số hoặc trong phần tóm tắt, hãy nêu ngắn gọn nguồn tài liệu hoặc chuẩn y tế tham chiếu đáng tin cậy (ví dụ: "Theo Hướng dẫn Chẩn đoán của Bộ Y tế Việt Nam", "Theo Khuyến cáo của Hội Tim mạch Việt Nam / VNHA", "Theo Hướng dẫn Lâm sàng của WHO / ADA").
-3. GỢI Ý DINH DƯỠNG & BẬN ĐỘNG HỖ TRỢ AN TOÀN:
-   - Thực đơn 1 ngày (5 bữa: BREAKFAST, LUNCH, DINNER, SNACK, DRINK) hỗ trợ cải thiện tình trạng dựa trên các chỉ số cần lưu ý.
-   - Bài tập thể chất (2-3 bài tập nhẹ nhàng, vừa sức, an toàn).
-
-HÃY TRẢ VỀ DUY NHẤT ĐỐI TƯỢNG JSON CÓ CẤU TRÚC SAU:
-{
-  "overallSummary": "Đoạn tóm tắt tổng quan khách quan 3-5 câu, điểm mặt các chỉ số cần lưu ý (nếu có), phân tích mối liên hệ tổng thể một cách dễ hiểu và nhấn mạnh trao đổi với bác sĩ điều trị.",
-  "results": [
-    {
-      "testCode": "MÃ CHỈ SỐ",
-      "testName": "TÊN CHỈ SỐ",
-      "value": 7.2,
-      "valueType": "NUMERIC hoặc QUALITATIVE",
-      "unit": "đơn vị",
-      "referenceLow": số hoặc null,
-      "referenceHigh": số hoặc null,
-      "referenceText": "chuỗi tham chiếu",
-      "status": "NORMAL | LOW | HIGH | ABNORMAL | UNKNOWN",
-      "explanation": "Lời giải thích y khoa dễ hiểu",
-      "sourceCitation": "Căn cứ y khoa tham chiếu"
-    }
-  ],
-  "mealPlan": {
-    "title": "Thực đơn dinh dưỡng hỗ trợ sức khỏe",
-    "description": "Mô tả định hướng dinh dưỡng",
-    "items": [
-      { "mealType": "BREAKFAST", "name": "...", "description": "...", "ingredients": "...", "preparation": "...", "rationale": "..." },
-      { "mealType": "LUNCH", "name": "...", "description": "...", "ingredients": "...", "preparation": "...", "rationale": "..." },
-      { "mealType": "DINNER", "name": "...", "description": "...", "ingredients": "...", "preparation": "...", "rationale": "..." },
-      { "mealType": "SNACK", "name": "...", "description": "...", "ingredients": "...", "preparation": "...", "rationale": "..." },
-      { "mealType": "DRINK", "name": "...", "description": "...", "ingredients": "...", "preparation": "...", "rationale": "..." }
-    ]
-  },
-  "exercisePlan": {
-    "title": "Kế hoạch vận động an toàn hỗ trợ thể trạng",
-    "items": [
-      { "name": "...", "description": "...", "duration": 20, "difficulty": "EASY", "rationale": "..." }
-    ]
-  }
-}`;
-
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
-    });
-
-    for (const model of CLIENT_MODELS_TO_TRY) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: [{ text: prompt }],
-          config: { responseMimeType: 'application/json' },
-        });
-
-        if (response && response.text) {
-          let cleaned = response.text.trim();
-          if (cleaned.startsWith('```json')) {
-            cleaned = cleaned.replace(/^```json/, '').replace(/```$/, '').trim();
-          } else if (cleaned.startsWith('```')) {
-            cleaned = cleaned.replace(/^```/, '').replace(/```$/, '').trim();
-          }
-          const parsed = JSON.parse(cleaned);
-          const baseBundle = buildCompleteBundle(reportId, confirmedResults, age);
-
-          return {
-            analysis: {
-              reportId,
-              overallSummary: parsed.overallSummary || baseBundle.analysis.overallSummary,
-              results: Array.isArray(parsed.results) && parsed.results.length > 0 ? parsed.results : baseBundle.analysis.results,
-            },
-            mealPlan: {
-              reportId,
-              title: parsed.mealPlan?.title || baseBundle.mealPlan.title,
-              description: parsed.mealPlan?.description || baseBundle.mealPlan.description,
-              items: Array.isArray(parsed.mealPlan?.items) && parsed.mealPlan.items.length > 0
-                ? parsed.mealPlan.items.map((m: any, i: number) => ({
-                    ...(baseBundle.mealPlan.items[i] || baseBundle.mealPlan.items[0]),
-                    ...m,
-                  }))
-                : baseBundle.mealPlan.items,
-            },
-            exercisePlan: {
-              reportId,
-              title: parsed.exercisePlan?.title || baseBundle.exercisePlan.title,
-              items: Array.isArray(parsed.exercisePlan?.items) && parsed.exercisePlan.items.length > 0
-                ? parsed.exercisePlan.items.map((ex: any, i: number) => ({
-                    ...(baseBundle.exercisePlan.items[i] || baseBundle.exercisePlan.items[0]),
-                    ...ex,
-                  }))
-                : baseBundle.exercisePlan.items,
-            },
-          };
-        }
-      } catch (modelErr) {
-        console.warn(`[PATIENT-CLIENT-ANALYSIS] Model ${model} failed:`, modelErr);
-      }
-    }
-  } catch (err) {
-    console.warn('[PATIENT-CLIENT-ANALYSIS] Error:', err);
-  }
-  return null;
-}
-
-/**
  * Confirm reviewed lab results and create full AI analysis bundle
- * Calls Gemini LLM for verified explanation + dietary & exercise recommendations
+ * Calls backend Gemini LLM (/api/patient/analyze) with safe offline rule-engine fallback (`buildCompleteBundle`).
  */
 export async function confirmAnalysis(
   reportId: string,
@@ -591,15 +345,18 @@ export async function confirmAnalysis(
 
   try {
     // 1. Try dedicated Patient LLM analysis endpoint
+    const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch('/api/patient/analyze', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         reportId,
         results: confirmedResults,
         age,
       }),
     });
+
+    await throwIfAuthRejected(res);
 
     const contentType = res.headers.get('content-type') || '';
     if (res.ok && contentType.includes('application/json')) {
@@ -609,21 +366,43 @@ export async function confirmAnalysis(
       }
     }
   } catch (err) {
-    console.warn('[PATIENT-SERVICE] Server AI Analysis endpoint failed, trying client AI:', err);
-  }
-
-  // 2. Fallback to client-side Gemini LLM analysis
-  if (!bundle) {
-    try {
-      bundle = await performClientAnalysis(reportId, confirmedResults, age);
-    } catch (clientErr) {
-      console.warn('[PATIENT-SERVICE] Client AI analysis fallback notice:', clientErr);
+    if (err instanceof ApiAuthError) {
+      throw err;
     }
+    console.warn('[PATIENT-SERVICE] Server AI Analysis endpoint unavailable, falling back to local rule engine:', err);
   }
 
-  // 3. Fallback to local rule engine if offline or model unavailable
+  // 2. Fallback to local deterministic rule engine if backend unavailable
   if (!bundle) {
     bundle = buildCompleteBundle(reportId, confirmedResults, age);
+    try {
+      const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const mediaRes = await fetch('/api/patient/media-search', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          mealItems: bundle.mealPlan.items.map((m) => ({
+            ...m,
+            imageSearchQuery: m.name,
+          })),
+          exerciseItems: bundle.exercisePlan.items.map((e) => ({
+            ...e,
+            videoSearchQuery: e.name,
+          })),
+        }),
+      });
+      if (mediaRes.ok && (mediaRes.headers.get('content-type') || '').includes('application/json')) {
+        const mediaJson = await mediaRes.json();
+        if (Array.isArray(mediaJson?.meals) && mediaJson.meals.length > 0) {
+          bundle.mealPlan.items = mediaJson.meals;
+        }
+        if (Array.isArray(mediaJson?.exercises) && mediaJson.exercises.length > 0) {
+          bundle.exercisePlan.items = mediaJson.exercises;
+        }
+      }
+    } catch {
+      // Keep local deterministic catalog fallback when offline
+    }
   }
 
   // 4. Save bundle locally scoped to authenticated patient
@@ -784,11 +563,14 @@ export async function sendPatientChatMessage(
 ): Promise<string> {
   // 1. Try Patient Chat server endpoint
   try {
+    const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch('/api/patient/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ message, reportSummary, labResults }),
     });
+
+    await throwIfAuthRejected(res);
 
     const contentType = res.headers.get('content-type') || '';
     if (res.ok && contentType.includes('application/json')) {
@@ -797,19 +579,25 @@ export async function sendPatientChatMessage(
         return json.reply || json.message;
       }
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof ApiAuthError) {
+      throw err;
+    }
     // Fallback
   }
 
   // 2. Try shared AI chat endpoint
   try {
+    const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch('/api/ai/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         message: reportSummary ? `[Bối cảnh xét nghiệm: ${reportSummary}] ${message}` : message,
       }),
     });
+
+    await throwIfAuthRejected(res);
 
     const contentType = res.headers.get('content-type') || '';
     if (res.ok && contentType.includes('application/json')) {
@@ -818,48 +606,12 @@ export async function sendPatientChatMessage(
         return json.reply || json.message || json.text;
       }
     }
-  } catch {
-    // Fallback
-  }
-
-  // 3. Direct client-side Gemini fallback
-  const apiKey = getClientGeminiApiKey();
-  if (apiKey) {
-    try {
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
-      });
-
-      const systemPrompt = `Bạn là Trợ lý Y tế & Sức khỏe thông minh thuộc hệ thống EYEAI (Chế độ Bệnh nhân).
-Nhiệm vụ: Giải thích các thắc mắc của bệnh nhân về chỉ số xét nghiệm, dinh dưỡng, lối sống và bài tập thể lực.
-NGUYÊN TẮC:
-- Trả lời bằng Tiếng Việt thân thiện, ân cần, rõ ràng, giải thích dễ hiểu.
-- Độ dài khoảng 3-6 câu, súc tích.
-- Tuyệt đối KHÔNG tự chẩn đoán bệnh hay thay đổi chỉ định của bác sĩ. Luôn khuyến khích bệnh nhân tham khảo bác sĩ chuyên môn khi cần quyết định điều trị.`;
-
-      const promptText = reportSummary
-        ? `[Bối cảnh xét nghiệm: ${reportSummary}]\n[Câu hỏi]: ${message}`
-        : message;
-
-      for (const model of CLIENT_MODELS_TO_TRY) {
-        try {
-          const response = await ai.models.generateContent({
-            model,
-            contents: [{ text: promptText }],
-            config: { systemInstruction: systemPrompt },
-          });
-          if (response && response.text) {
-            return response.text;
-          }
-        } catch {
-          // Continue to next model
-        }
-      }
-    } catch {
-      // Ignore
+  } catch (err) {
+    if (err instanceof ApiAuthError) {
+      throw err;
     }
+    // Safe static medical advice fallback when backend unreachable (no client API secrets)
   }
 
-  return 'Cảm ơn câu hỏi của bạn. Về các chỉ số xét nghiệm và sức khỏe, bạn nên duy trì lối sống lành mạnh, ăn uống đủ chất và tham khảo ý kiến bác sĩ khi cần.';
+  return 'Cảm ơn câu hỏi của bạn. Hiện hệ thống trợ lý AI trên máy chủ đang tạm bận hoặc ngoại tuyến. Về các chỉ số xét nghiệm và sức khỏe, bạn nên duy trì lối sống lành mạnh, ăn uống đủ chất và tham khảo ý kiến bác sĩ khi cần.';
 }

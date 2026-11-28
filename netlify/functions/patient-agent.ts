@@ -21,7 +21,12 @@ async function processAgentTurn(body: any, authHeader?: string) {
   if (!authRes.ok || !authRes.identity) {
     return {
       status: authRes.status,
-      data: { error: authRes.error || 'Không có quyền truy cập.' },
+      data: {
+        error: authRes.error || 'Không có quyền truy cập.',
+        code: authRes.code,
+        requiredAal: authRes.requiredAal,
+        currentAal: authRes.currentAal,
+      },
     };
   }
 

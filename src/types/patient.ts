@@ -1,5 +1,6 @@
 export type LabStatus = 'LOW' | 'NORMAL' | 'HIGH' | 'ABNORMAL' | 'UNCERTAIN' | 'UNKNOWN';
 export type ValueType = 'NUMERIC' | 'QUALITATIVE';
+export type OcrDocumentStatus = 'VALID' | 'UNKNOWN';
 
 export interface ReferenceRange {
   low: number | null;
@@ -23,6 +24,9 @@ export interface OcrResultItem {
 export interface OcrScanResponse {
   reportId: string;
   provider: string;
+  documentStatus?: OcrDocumentStatus;
+  isValidMedicalDocument?: boolean;
+  detectedSubject?: string | null;
   results: OcrResultItem[];
   hospitalOrLabName?: string | null;
   patientName?: string | null;
@@ -68,6 +72,8 @@ export interface MealPlanItem {
   imageSourceUrl?: string | null;
   imageLicense?: string | null;
   imageAuthor?: string | null;
+  imageProvider?: string | null;
+  imageSearchQuery?: string | null;
 }
 
 export interface MealPlan {
@@ -92,6 +98,8 @@ export interface ExercisePlanItem {
   youtubeAuthorUrl?: string | null;
   youtubeThumbnailUrl?: string | null;
   youtubeVerified?: boolean;
+  videoProvider?: string | null;
+  videoSearchQuery?: string | null;
 }
 
 export interface ExercisePlan {

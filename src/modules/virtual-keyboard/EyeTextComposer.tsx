@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Volume2, Send, Keyboard, Trash2, Delete } from 'lucide-react';
 import { speakVietnamese } from '../../utils/speech';
 import { EyeFocusable } from '../eye-control/EyeFocusable';
@@ -22,6 +22,14 @@ export function EyeTextComposer({
   onToggleKeyboard,
   isKeyboardOpen = false,
 }: EyeTextComposerProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.scrollLeft = inputRef.current.scrollWidth;
+    }
+  }, [value]);
+
   const handleSpeak = () => {
     if (value.trim()) {
       speakVietnamese(value);
@@ -37,12 +45,24 @@ export function EyeTextComposer({
   };
 
   return (
-    <div className="w-full bg-white rounded-[20px] p-2.5 sm:p-3 border-2 border-[#14213D]/10 shadow-[0_4px_20px_-4px_rgba(20,33,61,0.08)] flex flex-col gap-2">
-      {/* Draft text display box */}
-      <div className="relative w-full min-h-[46px] bg-[#FFF2D6]/40 rounded-[14px] px-3 py-2 border border-[#14213D]/10 flex items-center justify-between">
-        <div className="flex-1 pr-2 overflow-hidden text-ellipsis whitespace-nowrap text-base sm:text-lg font-bold text-[#14213D]">
-          {value ? value : <span className="text-[#3B4B68]/50 font-normal italic text-sm sm:text-base">{placeholder}</span>}
-        </div>
+    <div className="w-full bg-white rounded-[20px] p-2.5 sm:p-3 border-2 border-[#14213D]/15 shadow-[0_4px_20px_-4px_rgba(20,33,61,0.08)] flex flex-col gap-2">
+      {/* Draft text input & live letter preview box */}
+      <div className="relative w-full min-h-[48px] bg-[#FFF2D6]/55 rounded-[14px] px-3 py-2 border-2 border-[#14213D]/15 focus-within:border-[#6AC9F0] flex items-center justify-between gap-2 transition-colors">
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onSubmit();
+            }
+          }}
+          placeholder={placeholder}
+          aria-label={placeholder}
+          className="flex-1 min-w-0 bg-transparent text-base sm:text-lg font-extrabold text-[#14213D] placeholder:text-[#3B4B68]/55 placeholder:font-medium placeholder:italic outline-none"
+        />
 
         {/* Dynamic Action Buttons inside composer */}
         <div className="flex items-center gap-1 flex-shrink-0">

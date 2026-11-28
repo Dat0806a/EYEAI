@@ -118,9 +118,13 @@ export const chatService = {
     onMessage: (msg: DirectMessage) => void
   ): RealtimeChannel {
     const channelName = `conversation:${conversationId}`;
-    
+
     const channel = supabase
-      .channel(channelName)
+      .channel(channelName, {
+        config: {
+          private: true,
+        },
+      })
       .on(
         'postgres_changes',
         {

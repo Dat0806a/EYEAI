@@ -62,6 +62,8 @@ export const CameraPreview = memo(function CameraPreview({
       if (canvas) {
         const ctx = canvas.getContext('2d');
         ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.width = 0;
+        canvas.height = 0;
         canvas.style.opacity = '0';
       }
       if (video) {

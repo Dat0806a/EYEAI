@@ -119,12 +119,14 @@ export function YouTubePlayerView({ item, onBack }: YouTubePlayerViewProps) {
     };
   }, []);
 
+  const YOUTUBE_EMBED_ORIGIN = 'https://www.youtube-nocookie.com';
+
   const sendPostMessage = (func: string, args: any[] = []) => {
     if (iframeRef.current && iframeRef.current.contentWindow) {
       try {
         iframeRef.current.contentWindow.postMessage(
           JSON.stringify({ event: 'command', func, args }),
-          '*'
+          YOUTUBE_EMBED_ORIGIN
         );
       } catch (e) {
         console.warn('postMessage error:', e);

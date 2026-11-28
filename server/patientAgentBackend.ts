@@ -37,10 +37,15 @@ export function createPatientAgentRouter(options: PatientAgentRouterOptions = {}
 
   router.post('/turn', async (req: Request, res: Response) => {
     try {
-      // 1. Verify caller identity & patient role server-side (never trust req.body userId/role)
+      // 1. Verify caller identity, patient role & AAL2 MFA server-side (never trust req.body userId/role)
       const authRes = await verifyAuth(req.headers.authorization);
       if (!authRes.ok || !authRes.identity) {
-        res.status(authRes.status).json({ error: authRes.error || 'Không có quyền truy cập.' });
+        res.status(authRes.status).json({
+          error: authRes.error || 'Không có quyền truy cập.',
+          code: authRes.code,
+          requiredAal: authRes.requiredAal,
+          currentAal: authRes.currentAal,
+        });
         return;
       }
 

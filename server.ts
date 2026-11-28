@@ -2,18 +2,41 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import dotenv from "dotenv";
+import { loadServerEnvironment } from "./server/envLoader";
 import { handleEntertainmentSearch } from "./server/youtubeBackend";
 import { createPatientRouter } from "./server/patientBackend";
 import { createPatientAgentRouter } from "./server/patientAgentBackend";
+import { verifyAuthHeader } from "./server/patientAuth";
+import {
+  applyBrowserSecurityHeaders,
+  createInMemoryRateLimiter,
+  resolveAllowedCorsOrigin,
+} from "./server/securityMiddleware";
 
-dotenv.config();
+loadServerEnvironment();
 
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
 
+  app.use(applyBrowserSecurityHeaders);
   app.use(express.json({ limit: "25mb" }));
+
+  const aiRateLimiter = createInMemoryRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 30,
+    bucketPrefix: "ai-chat",
+  });
+  const entertainmentRateLimiter = createInMemoryRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 40,
+    bucketPrefix: "entertainment-search",
+  });
+  const ttsRateLimiter = createInMemoryRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 90,
+    bucketPrefix: "tts",
+  });
 
   // API Health Check
   app.get("/api/health", (_req, res) => {
@@ -49,8 +72,25 @@ async function startServer() {
    */
   const handleAiChat = async (req: express.Request, res: express.Response) => {
     try {
+      const authRes = await verifyAuthHeader(req.headers.authorization, { requirePatient: false });
+      if (!authRes.ok) {
+        res.status(authRes.status).json({
+          error: authRes.error || "Không có quyền truy cập.",
+          code: authRes.code,
+          requiredAal: authRes.requiredAal,
+          currentAal: authRes.currentAal,
+        });
+        return;
+      }
+
       if (!apiKey || !ai) {
         res.status(500).json({ error: "Chưa cấu hình GEMINI_API_KEY trong hệ thống máy chủ." });
+        return;
+      }
+
+      const rawBodySize = Buffer.byteLength(JSON.stringify(req.body ?? {}), "utf8");
+      if (rawBodySize > 100 * 1024) {
+        res.status(413).json({ error: "Dữ liệu yêu cầu vượt quá giới hạn 100KB." });
         return;
       }
 
@@ -147,22 +187,42 @@ async function startServer() {
     }
   };
 
-  // Backend Endpoints for AI Chat
-  app.post("/api/ai/chat", handleAiChat);
-  app.post("/api/gemini/chat", handleAiChat);
+  // Backend Endpoints for AI Chat (strict payload size + rate limit + JWT auth)
+  app.post("/api/ai/chat", aiRateLimiter, express.json({ limit: "100kb" }), handleAiChat);
+  app.post("/api/gemini/chat", aiRateLimiter, express.json({ limit: "100kb" }), handleAiChat);
   // Dedicated Isolated Router for Patient Autonomous Voice Agent
   app.use("/api/patient/agent", createPatientAgentRouter({ ai, apiKey }));
   // Dedicated Isolated Router for Patient Module (OCR Vision + Dynamic Lab Analysis + Health Chat)
   app.use("/api/patient", createPatientRouter(ai, apiKey));
 
   // Backend Endpoints for Entertainment YouTube Search (FREE QUOTA ONLY)
-  app.get("/api/entertainment/search", handleEntertainmentSearch);
-  app.post("/api/entertainment/search", handleEntertainmentSearch);
+  app.get("/api/entertainment/search", entertainmentRateLimiter, handleEntertainmentSearch);
+  app.post(
+    "/api/entertainment/search",
+    entertainmentRateLimiter,
+    (req, res, next) => {
+      if (Buffer.byteLength(JSON.stringify(req.body ?? {}), "utf8") > 32 * 1024) {
+        res.status(413).json({
+          success: false,
+          error: "PAYLOAD_TOO_LARGE",
+          message: "Dữ liệu tìm kiếm vượt quá giới hạn 32KB.",
+          results: [],
+        });
+        return;
+      }
+      next();
+    },
+    handleEntertainmentSearch
+  );
 
-  // Endpoint proxy TTS tieng Viet (chuyen tiep Google Translate TTS) cho trinh duyet khong co giong ban dia nhu Chrome Desktop
-  app.get("/api/tts", async (req, res) => {
+  // Endpoint proxy TTS tieng Viet (ho tro POST & GET, khong log noi dung TTS, khong public cache)
+  const handleTtsProxy = async (req: express.Request, res: express.Response) => {
     try {
-      const text = (req.query.text as string || "").trim();
+      const rawText =
+        req.method === "POST" && typeof req.body?.text === "string"
+          ? req.body.text
+          : (req.query.text as string) || "";
+      const text = rawText.trim();
       if (!text) {
         res.status(400).send("Text is required");
         return;
@@ -180,15 +240,21 @@ async function startServer() {
         return;
       }
       const arrayBuffer = await response.arrayBuffer();
+      const allowedOrigin = resolveAllowedCorsOrigin(req.headers.origin);
+      if (allowedOrigin) {
+        res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+        res.setHeader("Vary", "Origin");
+      }
       res.setHeader("Content-Type", "audio/mpeg");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+      res.setHeader("Cache-Control", "private, no-store, max-age=0");
       res.send(Buffer.from(arrayBuffer));
-    } catch (err: any) {
-      console.error("[TTS] Local server error:", err);
+    } catch {
+      console.error("[TTS] Local server proxy error");
       res.status(500).send("Error fetching TTS audio");
     }
-  });
+  };
+  app.get("/api/tts", ttsRateLimiter, handleTtsProxy);
+  app.post("/api/tts", ttsRateLimiter, express.json({ limit: "16kb" }), handleTtsProxy);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

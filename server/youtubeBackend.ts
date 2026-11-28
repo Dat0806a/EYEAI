@@ -1,4 +1,5 @@
 import express from "express";
+import { verifyAuthHeader } from "./patientAuth";
 
 export interface YouTubeNormalizedResult {
   videoId: string;
@@ -75,6 +76,17 @@ function decodeHtmlEntities(str: string): string {
  */
 export async function handleEntertainmentSearch(req: express.Request, res: express.Response) {
   try {
+    const authRes = await verifyAuthHeader(req.headers.authorization, { requirePatient: false });
+    if (!authRes.ok) {
+      res.status(authRes.status).json({
+        success: false,
+        error: authRes.code || "UNAUTHORIZED",
+        message: authRes.error || "Yêu cầu đăng nhập để sử dụng tìm kiếm giải trí.",
+        results: [],
+      });
+      return;
+    }
+
     const rawQuery = (req.query.q as string || req.body?.q as string || "").trim();
     const mode = (req.query.mode as string || req.body?.mode as string || "music").toLowerCase();
 

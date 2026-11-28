@@ -194,41 +194,87 @@ describe('Phase 1: Patient Regression Baseline & Security Foundation', () => {
       vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
       vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key-test');
 
-      // Mock Supabase returning an impaired account
+      const makeFakeJwt = (payload: Record<string, unknown>) => {
+        const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+        const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+        return `${header}.${body}.sig`;
+      };
+
+      // Mock Supabase returning an impaired account (with server policy)
       vi.spyOn(globalThis, 'fetch')
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ id: 'u_imp', email: 'an@eyetalk.app', user_metadata: { account_type: 'impaired' } }), {
+          new Response(JSON.stringify({ id: 'u_imp', email: 'an@eyetalk.app', app_metadata: { account_type: 'impaired' }, factors: [] }), {
             status: 200,
           })
         )
         .mockResolvedValueOnce(
-          new Response(JSON.stringify([{ id: 'u_imp', account_type: 'impaired', display_name: 'An' }]), {
+          new Response(JSON.stringify([{ account_type: 'impaired', mfa_enforced: false, role_verified: true, requires_role_review: false }]), {
+            status: 200,
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify([{ id: 'u_imp', display_name: 'An' }]), {
             status: 200,
           })
         );
 
-      const impairedRes = await verifyPatientAuthHeader('Bearer valid_imp_jwt');
+      const impairedRes = await verifyPatientAuthHeader(
+        `Bearer ${makeFakeJwt({ sub: 'u_imp', aal: 'aal1' })}`
+      );
       expect(impairedRes.ok).toBe(false);
       expect(impairedRes.status).toBe(403);
 
-      // Mock Supabase returning a patient account
+      // Mock Supabase returning a patient account at AAL1 -> blocked with 403 MFA_REQUIRED
       vi.spyOn(globalThis, 'fetch')
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ id: 'u_pat', email: 'binh@eyetalk.app', user_metadata: { account_type: 'patient' } }), {
+          new Response(JSON.stringify({ id: 'u_pat', email: 'binh@eyetalk.app', app_metadata: { account_type: 'patient' }, factors: [] }), {
             status: 200,
           })
         )
         .mockResolvedValueOnce(
-          new Response(JSON.stringify([{ id: 'u_pat', account_type: 'patient', display_name: 'Bình' }]), {
+          new Response(JSON.stringify([{ account_type: 'patient', mfa_enforced: true, role_verified: true, requires_role_review: false }]), {
+            status: 200,
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify([{ id: 'u_pat', display_name: 'Bình' }]), {
             status: 200,
           })
         );
 
-      const patientRes = await verifyPatientAuthHeader('Bearer valid_pat_jwt');
+      const patientAal1Res = await verifyPatientAuthHeader(
+        `Bearer ${makeFakeJwt({ sub: 'u_pat', aal: 'aal1' })}`
+      );
+      expect(patientAal1Res.ok).toBe(false);
+      expect(patientAal1Res.status).toBe(403);
+      expect(patientAal1Res.code).toBe('MFA_REQUIRED');
+
+      // Mock Supabase returning a patient account at AAL2 -> allowed
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: 'u_pat', email: 'binh@eyetalk.app', app_metadata: { account_type: 'patient' }, factors: [{ id: 'f1', status: 'verified' }] }), {
+            status: 200,
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify([{ account_type: 'patient', mfa_enforced: true, role_verified: true, requires_role_review: false }]), {
+            status: 200,
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify([{ id: 'u_pat', display_name: 'Bình' }]), {
+            status: 200,
+          })
+        );
+
+      const patientRes = await verifyPatientAuthHeader(
+        `Bearer ${makeFakeJwt({ sub: 'u_pat', aal: 'aal2' })}`
+      );
       expect(patientRes.ok).toBe(true);
       expect(patientRes.status).toBe(200);
       expect(patientRes.identity?.userId).toBe('u_pat');
       expect(patientRes.identity?.accountType).toBe('patient');
+      expect(patientRes.identity?.aal).toBe('aal2');
     });
   });
 });

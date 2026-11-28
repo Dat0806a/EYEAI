@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { EyeTrackingProvider } from './modules/eye-control/EyeTrackingProvider';
 import { EyeNavigationProvider } from './modules/eye-control/EyeNavigationProvider';
 import { useEyeTrackingSettings } from './modules/eye-control/useEyeTracking';
@@ -21,10 +21,12 @@ import { SplashScreen } from './components/ui/SplashScreen';
 import { preloadManager, PreloadProgressState } from './services/preloadManager';
 
 import { AuthPage } from './pages/AuthPage';
-import { useAuth } from './hooks/useAuth';
+import { AuthProvider, useAuth } from './hooks/useAuth';
 import { TutorialProvider, useTutorial } from './context/TutorialContext';
 import { OnboardingModal } from './components/ui/OnboardingModal';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
+import { ConsentModal } from './components/privacy/ConsentModal';
+import { ImpairedPermissionsModal } from './components/permissions/ImpairedPermissionsModal';
 
 // Patient Experience Imports
 import { PatientDashboardPage } from './experiences/patient/pages/PatientDashboardPage';
@@ -63,13 +65,66 @@ export type AppRoute =
   | 'patient-analysis'
   | 'patient-history';
 
-function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
+function isAuthCallbackUrl(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    const combined = `${hash}&${search}`;
+    return (
+      combined.includes('access_token=') ||
+      combined.includes('code=') ||
+      combined.includes('type=recovery') ||
+      combined.includes('type=signup') ||
+      combined.includes('type=magiclink') ||
+      combined.includes('type=invite')
+    );
+  } catch {
+    return false;
+  }
+}
+
+interface AppContentProps {
+  auth: ReturnType<typeof useAuth>;
+  isSplashActive: boolean;
+  setIsSplashActive: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+function AppContent({ auth, isSplashActive, setIsSplashActive }: AppContentProps) {
   const { isTutorialOpen, openTutorial, closeTutorial } = useTutorial();
-  const { isAuthenticated, profile, loading: authLoading } = auth;
-  const { settings, setEyeControlEnabled } = useEyeTrackingSettings();
-  const { mode: patientMode, featureEnabled: patientAgentFeatureEnabled, selectMode: selectPatientMode, resetMode: resetPatientMode } = usePatientMode();
+  const {
+    isAuthenticated,
+    mfaSatisfied,
+    isPasswordRecovery,
+    needsMfaEnrollment,
+    needsMfaVerification,
+    roleVerified,
+    requiresRoleReview,
+    profileError,
+    profile,
+    loading: authLoading,
+    refreshMfaState,
+    signOut,
+  } = auth;
+  const {
+    settings,
+    setEyeControlEnabled,
+    isConsentModalOpen,
+    grantFaceProcessingConsent,
+    closeConsentModal,
+  } = useEyeTrackingSettings();
+  const {
+    mode: patientMode,
+    featureEnabled: patientAgentFeatureEnabled,
+    selectMode: selectPatientMode,
+    resetMode: resetPatientMode,
+  } = usePatientMode();
   const [currentRoute, setCurrentRoute] = useState<AppRoute>('home');
   const [awaitingLoginRoute, setAwaitingLoginRoute] = useState<boolean>(false);
+  const [hasUserInitiatedAuth, setHasUserInitiatedAuth] = useState<boolean>(() => isAuthCallbackUrl());
+  const [pendingEmailOtp, setPendingEmailOtp] = useState<boolean>(false);
+  const [permissionsPromptDismissedForUser, setPermissionsPromptDismissedForUser] = useState<string | null>(null);
+  const didCheckBootSessionRef = useRef<boolean>(false);
 
   // Auto-disable eye control mode for patient accounts
   useEffect(() => {
@@ -77,6 +132,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
       setEyeControlEnabled(false);
     }
   }, [profile?.account_type, settings.eyeControlEnabled, setEyeControlEnabled]);
+
   const [chatFriend, setChatFriend] = useState<{
     id: string;
     name: string;
@@ -90,8 +146,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
   const [analysisInitialTab, setAnalysisInitialTab] = useState<'analysis' | 'meal' | 'exercise'>('analysis');
   const [isAutoEmergencyCall, setIsAutoEmergencyCall] = useState<boolean>(false);
 
-  // Startup Splash & Real Preload State
-  const [isSplashActive, setIsSplashActive] = useState<boolean>(true);
+  // Startup Splash & Real Preload State (lifted into AppWithAuth for fail-closed camera gate)
   const [preloadState, setPreloadState] = useState<PreloadProgressState>({
     progress: 0,
     completedTasks: 0,
@@ -141,19 +196,52 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const [hasPassedAuth, setHasPassedAuth] = useState<boolean>(false);
-
-  // Reset auth gate if unauthenticated
+  // Reset pending post-login route flag if unauthenticated
   useEffect(() => {
-    if (!isAuthenticated && !authLoading) {
-      setHasPassedAuth(false);
+    if (!isAuthenticated && !authLoading && !pendingEmailOtp) {
       setAwaitingLoginRoute(false);
+      setPermissionsPromptDismissedForUser(null);
+      if (!isAuthCallbackUrl()) {
+        setHasUserInitiatedAuth(false);
+      }
     }
-  }, [isAuthenticated, authLoading]);
+  }, [isAuthenticated, authLoading, pendingEmailOtp]);
 
-  // Resolve post-login route only after profile account_type is verified
+  // On initial boot, clear stale/unverified/incomplete leftover sessions from localStorage
+  // so unauthenticated visitors see Login/Register immediately instead of being trapped on a gate.
   useEffect(() => {
-    if (!awaitingLoginRoute || !isAuthenticated || authLoading || !profile?.account_type) return;
+    if (authLoading || didCheckBootSessionRef.current) return;
+    didCheckBootSessionRef.current = true;
+
+    if (
+      isAuthenticated &&
+      !hasUserInitiatedAuth &&
+      !isPasswordRecovery &&
+      !isAuthCallbackUrl() &&
+      (!mfaSatisfied ||
+        !roleVerified ||
+        requiresRoleReview ||
+        !profile?.account_type ||
+        Boolean(profileError))
+    ) {
+      void signOut();
+    }
+  }, [
+    authLoading,
+    isAuthenticated,
+    hasUserInitiatedAuth,
+    isPasswordRecovery,
+    mfaSatisfied,
+    roleVerified,
+    requiresRoleReview,
+    profile?.account_type,
+    profileError,
+    signOut,
+  ]);
+
+  // Resolve post-login route only after profile account_type AND MFA policy are satisfied
+  useEffect(() => {
+    if (pendingEmailOtp || !awaitingLoginRoute || !mfaSatisfied || authLoading || !profile?.account_type) return;
     setAwaitingLoginRoute(false);
     if (profile.account_type === 'patient') {
       navigateTo(patientAgentFeatureEnabled ? 'patient-mode-select' : 'patient-home');
@@ -161,11 +249,12 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
       openTutorial();
       navigateTo('home');
     }
-  }, [awaitingLoginRoute, isAuthenticated, authLoading, profile?.account_type, patientAgentFeatureEnabled]);
+  }, [pendingEmailOtp, awaitingLoginRoute, mfaSatisfied, authLoading, profile?.account_type, patientAgentFeatureEnabled]);
 
   // Lang nghe su kien thoat toan cuc `eyeai:escape` (tu EyeNavigationProvider khi het modal/nut Back) de dua ve trang chu
   useEffect(() => {
     const handleEyeEscape = () => {
+      if (!mfaSatisfied) return;
       const homeRoute = profile?.account_type === 'patient' ? 'patient-home' : 'home';
       if (currentRoute !== homeRoute && currentRoute !== 'patient-mode-select' && currentRoute !== 'auth' && currentRoute !== 'login' && currentRoute !== 'register') {
         navigateTo(homeRoute);
@@ -174,12 +263,12 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
 
     window.addEventListener('eyeai:escape', handleEyeEscape);
     return () => window.removeEventListener('eyeai:escape', handleEyeEscape);
-  }, [currentRoute, profile?.account_type]);
+  }, [currentRoute, profile?.account_type, mfaSatisfied]);
 
   // Lang nghe su kien khan cap toan cuc `eyeai:emergency` (khi chop mat 3 lan hoac bam F1) de mo ngay trang SOS va tu dong goi
   useEffect(() => {
     const handleGlobalEmergency = () => {
-      if (profile?.account_type === 'patient') return;
+      if (!mfaSatisfied || profile?.account_type === 'patient') return;
       setIsAutoEmergencyCall(true);
       setCurrentRoute('sos');
       window.scrollTo(0, 0);
@@ -187,15 +276,25 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
 
     window.addEventListener('eyeai:emergency', handleGlobalEmergency);
     return () => window.removeEventListener('eyeai:emergency', handleGlobalEmergency);
-  }, [profile?.account_type]);
+  }, [profile?.account_type, mfaSatisfied]);
 
-  // EXPERIENCE ROUTER ENGINE: Handle account_type switching automatically
+  // EXPERIENCE ROUTER ENGINE: Handle account_type switching & reload route restoration automatically
   useEffect(() => {
-    if (!isAuthenticated || authLoading || !profile?.account_type) return;
+    if (pendingEmailOtp || !mfaSatisfied || authLoading || !profile?.account_type) return;
 
     const accountType = profile.account_type;
 
-    // Check if user account_type has changed while logged in
+    if (currentRoute === 'auth' || currentRoute === 'login' || currentRoute === 'register') {
+      setCurrentRoute(
+        accountType === 'patient'
+          ? patientAgentFeatureEnabled && patientMode === null
+            ? 'patient-mode-select'
+            : 'patient-home'
+          : 'home'
+      );
+      return;
+    }
+
     if (accountType === 'patient') {
       const impairedRoutes: AppRoute[] = ['home', 'speak', 'ai', 'sos', 'entertainment', 'location', 'contacts', 'chat', 'dev-dashboard'];
       const patientWorkRoutes: AppRoute[] = ['patient-home', 'patient-scan', 'patient-review', 'patient-analysis', 'patient-history'];
@@ -210,32 +309,44 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
         setCurrentRoute('home');
       }
     }
-  }, [profile?.account_type, isAuthenticated, authLoading, currentRoute, patientMode, patientAgentFeatureEnabled]);
+  }, [profile?.account_type, mfaSatisfied, authLoading, currentRoute, patientMode, patientAgentFeatureEnabled]);
 
-  // Show Auth Screen whenever splash is closed and user hasn't passed auth yet, or route is auth/login/register
+  const isResolvingAuthState =
+    !isSplashActive && authLoading && isAuthenticated && !pendingEmailOtp;
+
+  // Show Auth/MFA/Recovery Gateway whenever unauthenticated, in Email OTP step, in recovery, MFA pending, role unresolved, or explicit auth route
   const shouldShowAuth =
-    !hasPassedAuth ||
-    !isAuthenticated ||
-    currentRoute === 'auth' ||
-    currentRoute === 'login' ||
-    currentRoute === 'register';
+    pendingEmailOtp ||
+    (!isResolvingAuthState &&
+      (!isAuthenticated ||
+        isPasswordRecovery ||
+        needsMfaEnrollment ||
+        needsMfaVerification ||
+        !mfaSatisfied ||
+        !profile?.account_type ||
+        currentRoute === 'auth' ||
+        currentRoute === 'login' ||
+        currentRoute === 'register'));
 
   const isResolvingPostLoginProfile =
-    !isSplashActive &&
-    !shouldShowAuth &&
-    (authLoading || !profile?.account_type || awaitingLoginRoute);
+    isResolvingAuthState || (!shouldShowAuth && awaitingLoginRoute);
 
-  const handleLoginSuccess = () => {
-    setHasPassedAuth(true);
+  const handleLoginSuccess = async () => {
+    setHasUserInitiatedAuth(true);
     resetPatientMode();
     resetPatientRuntimeSnapshot();
-    if (profile?.account_type === 'patient') {
+    await refreshMfaState();
+    const role = profile?.account_type;
+    if (!role) {
+      setAwaitingLoginRoute(true);
+      return;
+    }
+
+    if (role === 'patient') {
       navigateTo(patientAgentFeatureEnabled ? 'patient-mode-select' : 'patient-home');
-    } else if (profile?.account_type === 'impaired') {
+    } else {
       openTutorial();
       navigateTo('home');
-    } else {
-      setAwaitingLoginRoute(true);
     }
   };
 
@@ -245,6 +356,20 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
     }
     return 'home';
   };
+
+  const isInImpairedMode =
+    !isSplashActive &&
+    !shouldShowAuth &&
+    !isResolvingPostLoginProfile &&
+    mfaSatisfied &&
+    profile?.account_type === 'impaired' &&
+    !currentRoute.startsWith('patient-');
+
+  const isPermissionsModalOpen =
+    isInImpairedMode &&
+    !isConsentModalOpen &&
+    Boolean(auth.userId) &&
+    permissionsPromptDismissedForUser !== auth.userId;
 
   return (
     <>
@@ -265,19 +390,19 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
         )}
       </AnimatePresence>
 
-      {/* Global Accessibility Eye Camera HUD - only for verified Impaired users, never on Patient routes or while resolving profile */}
-      {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && profile?.account_type === 'impaired' && !currentRoute.startsWith('patient-') && (
+      {/* Global Accessibility Eye Camera HUD - only for verified Impaired users after MFA, never on Patient routes */}
+      {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'impaired' && !currentRoute.startsWith('patient-') && (
         <GlobalEyeHUD variant="floating" currentRoute={currentRoute} />
       )}
 
       <div className="min-h-screen text-[#14213D] font-sans antialiased selection:bg-[#6AC9F0] selection:text-[#14213D] relative bg-[#FFF2D6]">
         {/* Continuous Full-Screen Global Video Background for main app */}
-        {!shouldShowAuth && <BackgroundVideo />}
+        {!shouldShowAuth && !isResolvingAuthState && <BackgroundVideo />}
 
         {/* Application Content Layer */}
         <div className="relative z-10">
           <AnimatePresence mode="wait">
-            {/* 1. Unauthenticated Gateway: Login / Register */}
+            {/* 1. Unauthenticated / MFA / Recovery Gateway */}
             {!isSplashActive && shouldShowAuth && (
               <motion.div
                 key="page-auth"
@@ -289,11 +414,14 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
                 <AuthPage
                   initialMode={currentRoute === 'register' ? 'register' : 'login'}
                   onLoginSuccess={handleLoginSuccess}
+                  onAuthStart={() => setHasUserInitiatedAuth(true)}
+                  pendingEmailOtp={pendingEmailOtp}
+                  onPendingEmailOtpChange={setPendingEmailOtp}
                 />
               </motion.div>
             )}
 
-            {/* 1B. Profile Resolution Gate (prevents routing patient through Impaired Home) */}
+            {/* 1B. Session / Profile / MFA Resolution Gate */}
             {isResolvingPostLoginProfile && (
               <motion.div
                 key="page-resolving-profile"
@@ -304,14 +432,14 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
                 className="min-h-screen flex items-center justify-center p-6"
               >
                 <div className="bg-white/95 rounded-[28px] px-6 py-5 border-2 border-[#14213D]/12 shadow-md text-center">
-                  <p className="font-black text-base text-[#14213D]">Đang xác minh tài khoản...</p>
+                  <p className="font-black text-base text-[#14213D]">Đang xác minh phiên & bảo mật tài khoản...</p>
                   <p className="text-xs font-bold text-[#3B4B68] mt-1">Vui lòng chờ trong giây lát</p>
                 </div>
               </motion.div>
             )}
 
             {/* 2A. IMPAIRED EXPERIENCE PAGES */}
-            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && profile?.account_type === 'impaired' && currentRoute === 'home' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'impaired' && currentRoute === 'home' && (
               <motion.div
                 key="page-home"
                 initial={{ opacity: 0 }}
@@ -323,7 +451,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && currentRoute === 'speak' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'impaired' && currentRoute === 'speak' && (
               <motion.div
                 key="page-speak"
                 initial={{ opacity: 0 }}
@@ -335,7 +463,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && currentRoute === 'ai' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'impaired' && currentRoute === 'ai' && (
               <motion.div
                 key="page-ai"
                 initial={{ opacity: 0 }}
@@ -347,7 +475,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && currentRoute === 'sos' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'impaired' && currentRoute === 'sos' && (
               <motion.div
                 key="page-sos"
                 initial={{ opacity: 0 }}
@@ -359,7 +487,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && currentRoute === 'entertainment' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'impaired' && currentRoute === 'entertainment' && (
               <motion.div
                 key="page-entertainment"
                 initial={{ opacity: 0 }}
@@ -371,7 +499,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && currentRoute === 'location' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'impaired' && currentRoute === 'location' && (
               <motion.div
                 key="page-location"
                 initial={{ opacity: 0 }}
@@ -383,7 +511,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && currentRoute === 'contacts' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'impaired' && currentRoute === 'contacts' && (
               <motion.div
                 key="page-contacts"
                 initial={{ opacity: 0 }}
@@ -398,7 +526,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && currentRoute === 'chat' && chatFriend && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'impaired' && currentRoute === 'chat' && chatFriend && (
               <motion.div
                 key="page-chat"
                 initial={{ opacity: 0 }}
@@ -413,7 +541,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && currentRoute === 'dev-dashboard' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'impaired' && currentRoute === 'dev-dashboard' && (
               <motion.div
                 key="page-dev-dashboard"
                 initial={{ opacity: 0 }}
@@ -421,12 +549,20 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
               >
-                <EyeTalkDashboard onBackToHome={() => navigateTo('home')} />
+                <EyeTalkDashboard
+                  onBackToHome={() => navigateTo('home')}
+                  auth={{
+                    isAuthenticated: isAuthenticated && mfaSatisfied && !isPasswordRecovery && !isSplashActive,
+                    loading: authLoading || isResolvingPostLoginProfile,
+                    userId: auth.userId,
+                    accountType: profile?.account_type ?? null,
+                  }}
+                />
               </motion.div>
             )}
 
             {/* 2B. SHARED SETTINGS PAGE */}
-            {!shouldShowAuth && !authLoading && currentRoute === 'settings' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && currentRoute === 'settings' && (
               <motion.div
                 key="page-settings"
                 initial={{ opacity: 0 }}
@@ -438,8 +574,8 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {/* 2C. PATIENT EXPERIENCE PAGES */}
-            {!shouldShowAuth && !authLoading && !isResolvingPostLoginProfile && profile?.account_type === 'patient' && currentRoute === 'patient-mode-select' && (
+            {/* 2C. PATIENT EXPERIENCE PAGES (Requires AAL2 / mfaSatisfied) */}
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'patient' && currentRoute === 'patient-mode-select' && (
               <motion.div
                 key="page-patient-mode-select"
                 initial={{ opacity: 0 }}
@@ -463,7 +599,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && !isResolvingPostLoginProfile && profile?.account_type === 'patient' && currentRoute === 'patient-home' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'patient' && currentRoute === 'patient-home' && (
               <motion.div
                 key="page-patient-home"
                 data-patient-workspace="true"
@@ -482,7 +618,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && !isResolvingPostLoginProfile && profile?.account_type === 'patient' && currentRoute === 'patient-scan' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'patient' && currentRoute === 'patient-scan' && (
               <motion.div
                 key="page-patient-scan"
                 data-patient-workspace="true"
@@ -501,7 +637,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && !isResolvingPostLoginProfile && profile?.account_type === 'patient' && currentRoute === 'patient-review' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'patient' && currentRoute === 'patient-review' && (
               <motion.div
                 key="page-patient-review"
                 data-patient-workspace="true"
@@ -523,7 +659,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && !isResolvingPostLoginProfile && profile?.account_type === 'patient' && currentRoute === 'patient-analysis' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'patient' && currentRoute === 'patient-analysis' && (
               <motion.div
                 key="page-patient-analysis"
                 data-patient-workspace="true"
@@ -542,7 +678,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
               </motion.div>
             )}
 
-            {!shouldShowAuth && !authLoading && !isResolvingPostLoginProfile && profile?.account_type === 'patient' && currentRoute === 'patient-history' && (
+            {!isSplashActive && !shouldShowAuth && !isResolvingPostLoginProfile && mfaSatisfied && profile?.account_type === 'patient' && currentRoute === 'patient-history' && (
               <motion.div
                 key="page-patient-history"
                 data-patient-workspace="true"
@@ -569,6 +705,7 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
       {!isSplashActive &&
         !shouldShowAuth &&
         !isResolvingPostLoginProfile &&
+        mfaSatisfied &&
         profile?.account_type === 'patient' &&
         patientAgentFeatureEnabled &&
         patientMode === 'agent' && (
@@ -588,45 +725,93 @@ function AppContent({ auth }: { auth: ReturnType<typeof useAuth> }) {
           </React.Suspense>
         )}
 
-      {/* Onboarding Tutorial Modal (never obstructs patient mode selection) */}
+      {/* Device Permissions Prompt Modal (Shown when entering Impaired user mode) */}
+      <ImpairedPermissionsModal
+        isOpen={isPermissionsModalOpen}
+        userId={auth.userId}
+        cameraEnabled={settings.eyeControlEnabled}
+        onCameraToggle={(enabled) => setEyeControlEnabled(enabled)}
+        onClose={() => {
+          if (auth.userId) {
+            setPermissionsPromptDismissedForUser(auth.userId);
+          }
+        }}
+      />
+
+      {/* Onboarding Tutorial Modal (never obstructs patient mode selection, auth, or permissions prompt) */}
       <OnboardingModal
-        isOpen={isTutorialOpen && currentRoute !== 'patient-mode-select'}
+        isOpen={
+          isTutorialOpen &&
+          mfaSatisfied &&
+          currentRoute !== 'patient-mode-select' &&
+          !isConsentModalOpen &&
+          !isPermissionsModalOpen
+        }
         onClose={closeTutorial}
+      />
+
+      {/* Dual-Layer Privacy Consent Modal (Impaired users only) */}
+      <ConsentModal
+        isOpen={isInImpairedMode && isConsentModalOpen}
+        onAccept={(grantCalibrationStorage) =>
+          grantFaceProcessingConsent(grantCalibrationStorage, 'consent_modal')
+        }
+        onDecline={() => {
+          closeConsentModal();
+          setEyeControlEnabled(false);
+        }}
       />
     </>
   );
 }
 
-function AppWithPatientMode() {
+function AppWithAuth() {
   const auth = useAuth();
+  const [isSplashActive, setIsSplashActive] = useState<boolean>(true);
+
   return (
-    <PatientModeProvider
-      userId={auth.userId}
-      accountType={auth.profile?.account_type}
-      isAuthenticated={auth.isAuthenticated}
+    <EyeTrackingProvider
+      auth={{
+        isAuthenticated:
+          auth.isAuthenticated &&
+          auth.mfaSatisfied &&
+          !auth.isPasswordRecovery &&
+          !isSplashActive,
+        loading: auth.loading || auth.mfaLoading,
+        userId: auth.userId,
+        accountType: auth.profile?.account_type ?? null,
+      }}
     >
-      <AppContent auth={auth} />
-    </PatientModeProvider>
+      <EyeNavigationProvider>
+        <CallProvider>
+          <PatientModeProvider
+            userId={auth.userId}
+            accountType={auth.profile?.account_type}
+            isAuthenticated={auth.isAuthenticated && auth.mfaSatisfied}
+          >
+            <AppContent
+              auth={auth}
+              isSplashActive={isSplashActive}
+              setIsSplashActive={setIsSplashActive}
+            />
+          </PatientModeProvider>
+        </CallProvider>
+      </EyeNavigationProvider>
+    </EyeTrackingProvider>
   );
 }
 
 /**
  * Thanh phan goc `App`: Boc he thong trong cay cung cap ngu canh phan tang.
- * - `ErrorBoundary` -> `TutorialProvider` -> `EyeTrackingProvider` (nhan dien camera va cu chi mat)
- *   -> `EyeNavigationProvider` (dieu huong khong gian 2 chieu va luoi) -> `CallProvider` (goi thoai) -> `AppWithPatientMode`.
  */
 export default function App() {
   return (
     <ErrorBoundary>
-      <TutorialProvider>
-        <EyeTrackingProvider>
-          <EyeNavigationProvider>
-            <CallProvider>
-              <AppWithPatientMode />
-            </CallProvider>
-          </EyeNavigationProvider>
-        </EyeTrackingProvider>
-      </TutorialProvider>
+      <AuthProvider>
+        <TutorialProvider>
+          <AppWithAuth />
+        </TutorialProvider>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }

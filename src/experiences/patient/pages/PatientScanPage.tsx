@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { PageHeader } from '../../../components/ui/PageHeader';
 import { AppButton } from '../../../components/ui/AppButton';
 import { Upload, Camera, FileText, AlertCircle, Loader2 } from 'lucide-react';
-import { scanOcr } from '../../../services/patientService';
+import { scanOcr, InvalidMedicalImageError } from '../../../services/patientService';
 import { OcrResultItem } from '../../../types/patient';
 import { useAgentRuntimeSync } from '../voice-agent/context/useAgentRuntimeSync';
 
@@ -17,24 +17,32 @@ export function PatientScanPage({ onBack, onOpenSettings, onScanComplete }: Pati
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationStatus, setValidationStatus] = useState<'UNKNOWN' | null>(null);
+  const [detectedSubject, setDetectedSubject] = useState<string | null>(null);
 
   // Sync scan page state into Agent runtime store (no-ops in Default Mode)
   useAgentRuntimeSync({
     currentRoute: 'patient-scan',
-    uploadStatus: loading ? 'uploading' : 'idle',
-    ocrStatus: loading ? 'running' : 'idle',
+    uploadStatus: loading ? 'uploading' : error ? 'error' : 'idle',
+    ocrStatus: loading ? 'running' : error ? 'error' : 'idle',
     errorStatus: error,
   });
 
   const handleFileProcess = async (file: File | undefined | null) => {
     if (!file) return;
     setError(null);
+    setValidationStatus(null);
+    setDetectedSubject(null);
     setLoading(true);
 
     try {
       const res = await scanOcr(file);
       onScanComplete(res.reportId, res.results);
     } catch (err: unknown) {
+      if (err instanceof InvalidMedicalImageError || (err as any)?.documentStatus === 'UNKNOWN') {
+        setValidationStatus('UNKNOWN');
+        setDetectedSubject((err as any)?.detectedSubject || null);
+      }
       const msg = err instanceof Error ? err.message : 'Không thể quét ảnh xét nghiệm.';
       setError(msg);
     } finally {
@@ -65,9 +73,27 @@ export function PatientScanPage({ onBack, onOpenSettings, onScanComplete }: Pati
           </p>
 
           {error && (
-            <div className="p-3.5 rounded-2xl bg-rose-500/15 border border-rose-500/40 text-rose-950 text-xs font-black flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>{error}</span>
+            <div
+              role="alert"
+              data-validation-status={validationStatus || undefined}
+              className="p-4 rounded-2xl bg-rose-500/15 border-2 border-rose-500/40 text-rose-950 text-xs font-black flex flex-col gap-1.5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{error}</span>
+                </div>
+                {validationStatus === 'UNKNOWN' && (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black tracking-wider shrink-0">
+                    UNKNOWN
+                  </span>
+                )}
+              </div>
+              {detectedSubject && (
+                <span className="text-[11px] font-bold text-rose-800 pl-6">
+                  Nội dung nhận diện: {detectedSubject}
+                </span>
+              )}
             </div>
           )}
 
@@ -85,7 +111,11 @@ export function PatientScanPage({ onBack, onOpenSettings, onScanComplete }: Pati
                 type="file"
                 accept="image/*,application/pdf,text/plain"
                 className="hidden"
-                onChange={(e) => handleFileProcess(e.target.files?.[0])}
+                onChange={(e) => {
+                  const selectedFile = e.target.files?.[0];
+                  e.target.value = '';
+                  handleFileProcess(selectedFile);
+                }}
               />
 
               {/* Drag and drop target */}

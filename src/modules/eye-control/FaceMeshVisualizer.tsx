@@ -12,6 +12,7 @@ import {
   RIGHT_EYEBROW,
   Point,
 } from './eyeTracker';
+import { getLatestLandmarks } from './landmarkStore';
 import { X, RefreshCw, Eye, Compass, Rotate3d, Layers, ShieldCheck, Zap } from 'lucide-react';
 
 interface FaceMeshVisualizerProps {
@@ -83,6 +84,19 @@ export const FaceMeshVisualizer = memo(function FaceMeshVisualizer({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    if (!trackingState.cameraActive) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#0a0f1d';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Camera đang tắt. Bật camera để xem lưới khuôn mặt.', canvas.width / 2, canvas.height / 2);
+      }
+      return;
+    }
+
     let active = true;
 
     const renderLoop = () => {
@@ -115,8 +129,8 @@ export const FaceMeshVisualizer = memo(function FaceMeshVisualizer({
           ctx.stroke();
         }
 
-        // Access raw landmarks from window cache or provider ref
-        const latestLandmarks: Point[] | undefined = (window as any).__eyeai_latest_landmarks;
+        // Access raw landmarks via encapsulated module getter
+        const latestLandmarks: readonly Point[] | null = getLatestLandmarks();
 
         if (latestLandmarks && latestLandmarks.length >= 468) {
           // Center of face for 3D rotation pivot
@@ -266,7 +280,7 @@ export const FaceMeshVisualizer = memo(function FaceMeshVisualizer({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [isOpen, orbitRotX, orbitRotY, is3DMode, trackingState.gazeX, trackingState.gazeY, videoRef]);
+  }, [isOpen, orbitRotX, orbitRotY, is3DMode, trackingState.gazeX, trackingState.gazeY, trackingState.cameraActive, videoRef]);
 
   if (!isOpen) return null;
 

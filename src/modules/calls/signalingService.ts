@@ -16,6 +16,7 @@ export const signalingService = {
     const channel = supabase
       .channel(channelName, {
         config: {
+          private: true,
           broadcast: { self: false },
         },
       })
@@ -38,7 +39,7 @@ export const signalingService = {
   async sendUserSignal(targetUserId: string, payload: SignalingPayload): Promise<boolean> {
     const channelName = `user_signaling_${targetUserId}`;
     const channel = supabase.channel(channelName, {
-      config: { broadcast: { self: false } },
+      config: { private: true, broadcast: { self: false } },
     });
 
     return new Promise(resolve => {
@@ -76,6 +77,7 @@ export const signalingService = {
     const channel = supabase
       .channel(channelName, {
         config: {
+          private: true,
           broadcast: { self: false },
         },
       })

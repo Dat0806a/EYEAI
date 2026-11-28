@@ -169,9 +169,12 @@ export function SpeakPage({ onBack }: SpeakPageProps) {
 
   return (
     <div
-      className={`min-h-screen bg-[#FFF2D6] text-[#14213D] flex flex-col relative selection:bg-[#6AC9F0] ${
-        isKeyboardOpen ? 'pb-[320px] sm:pb-[350px]' : 'pb-24'
-      }`}
+      className="min-h-screen bg-[#FFF2D6] text-[#14213D] flex flex-col relative selection:bg-[#6AC9F0]"
+      style={{
+        paddingBottom: isKeyboardOpen
+          ? 'calc(var(--virtual-keyboard-height, 245px) + 140px)'
+          : '140px',
+      }}
     >
       {/* Sticky Top Header Container */}
       <div className="sticky top-0 z-40 w-full flex flex-col">
@@ -359,9 +362,11 @@ export function SpeakPage({ onBack }: SpeakPageProps) {
 
       {/* Fixed Bottom Composer Container */}
       <div
-        className={`fixed bottom-0 left-0 right-0 z-30 p-2 md:p-3 bg-[#FFF2D6] border-t border-[#14213D]/10 shadow-lg transition-all duration-200 ${
-          isKeyboardOpen ? 'pb-[225px] sm:pb-[255px]' : 'pb-2'
-        }`}
+        className="fixed left-0 right-0 z-30 px-2 py-2 md:px-3 md:py-2.5 bg-[#FFF2D6] border-t border-[#14213D]/10 shadow-lg transition-[bottom] duration-200"
+        style={{
+          bottom: isKeyboardOpen ? 'var(--virtual-keyboard-height, 245px)' : '0px',
+          paddingBottom: isKeyboardOpen ? undefined : 'max(8px, env(safe-area-inset-bottom))',
+        }}
       >
         <div className="max-w-md md:max-w-xl mx-auto w-full flex flex-col gap-2">
           <EyeTextComposer

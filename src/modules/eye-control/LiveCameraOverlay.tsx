@@ -14,6 +14,7 @@ import {
   EYE_INDICES,
   Point,
 } from './eyeTracker';
+import { getLatestLandmarks } from './landmarkStore';
 
 interface LiveCameraOverlayProps {
   className?: string;
@@ -36,23 +37,34 @@ export const LiveCameraOverlay = memo(function LiveCameraOverlay({
   const { trackingState } = useEyeTrackingTelemetry();
 
   useEffect(() => {
-    let animId: number;
+    const canvas = canvasRef.current;
+    if (!trackingState.cameraActive || !trackingState.faceDetected) {
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      return;
+    }
+
+    let animId = 0;
+    let active = true;
 
     const render = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) {
+      if (!active) return;
+      const targetCanvas = canvasRef.current;
+      if (!targetCanvas) {
         animId = requestAnimationFrame(render);
         return;
       }
 
-      const ctx = canvas.getContext('2d');
+      const ctx = targetCanvas.getContext('2d');
       if (!ctx) {
         animId = requestAnimationFrame(render);
         return;
       }
 
       // Sync canvas dimensions with display size (and handle devicePixelRatio for retina crispness)
-      const rect = canvas.getBoundingClientRect();
+      const rect = targetCanvas.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const displayW = Math.round(rect.width);
       const displayH = Math.round(rect.height);
@@ -62,17 +74,17 @@ export const LiveCameraOverlay = memo(function LiveCameraOverlay({
         return;
       }
 
-      if (canvas.width !== displayW * dpr || canvas.height !== displayH * dpr) {
-        canvas.width = displayW * dpr;
-        canvas.height = displayH * dpr;
+      if (targetCanvas.width !== displayW * dpr || targetCanvas.height !== displayH * dpr) {
+        targetCanvas.width = displayW * dpr;
+        targetCanvas.height = displayH * dpr;
       }
 
       ctx.save();
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, displayW, displayH);
 
-      // Access latest face mesh landmarks cached globally from tracking pipeline
-      const landmarks: Point[] | undefined = (window as any).__eyeai_latest_landmarks;
+      // Access latest face mesh landmarks via encapsulated module getter
+      const landmarks: readonly Point[] | null = getLatestLandmarks();
 
       if (!landmarks || landmarks.length < 468 || !trackingState.faceDetected) {
         ctx.restore();
@@ -240,9 +252,10 @@ export const LiveCameraOverlay = memo(function LiveCameraOverlay({
 
     animId = requestAnimationFrame(render);
     return () => {
+      active = false;
       cancelAnimationFrame(animId);
     };
-  }, [overlaySettings, mirrored, videoElement, trackingState.faceDetected]);
+  }, [overlaySettings, mirrored, videoElement, trackingState.faceDetected, trackingState.cameraActive]);
 
   return (
     <canvas

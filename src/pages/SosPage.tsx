@@ -11,22 +11,41 @@ interface SosPageProps {
   autoCall?: boolean;
 }
 
-interface EmergencyContact {
+export interface EmergencyContact {
   id: string;
   name: string;
   role: string;
   phone: string;
 }
 
-const EMERGENCY_CONTACTS: EmergencyContact[] = [
+export const EMERGENCY_CONTACTS: EmergencyContact[] = [
   { id: 'c3', name: 'Trung tâm Cấp cứu 115', role: 'Y tế khẩn cấp', phone: '115' },
   { id: 'c1', name: 'Bác sĩ Nguyễn Văn A', role: 'Bác sĩ điều trị chính', phone: '0901 234 567' },
   { id: 'c2', name: 'Trần Thị B (Người thân)', role: 'Vợ / Người chăm sóc', phone: '0912 345 678' },
 ];
 
+export function toTelHref(phone: string): string {
+  const normalized = phone.replace(/[^\d+]/g, '');
+  return `tel:${normalized}`;
+}
+
+export function triggerDevicePhoneCall(phone: string): string {
+  const telHref = toTelHref(phone);
+  if (typeof window !== 'undefined') {
+    window.location.href = telHref;
+  }
+  return telHref;
+}
+
 export function SosPage({ onBack, autoCall = false }: SosPageProps) {
   const { trackingState } = useEyeTrackingTelemetry();
-  const { closedDuration, eyesClosed, blinkCount = 0, lastExecutedAction } = trackingState;
+  const {
+    closedDuration,
+    eyesClosed,
+    blinkCount = 0,
+    lastExecutedAction,
+    lastExecutedTimestamp = 0,
+  } = trackingState;
 
   const [selectedContact, setSelectedContact] = useState<EmergencyContact>(EMERGENCY_CONTACTS[0]);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -35,50 +54,64 @@ export function SosPage({ onBack, autoCall = false }: SosPageProps) {
   const [callTimer, setCallTimer] = useState<number>(0);
 
   const callIntervalRef = useRef<any>(null);
+  const sosTriggeredRef = useRef<boolean>(false);
+  const handledEmergencyTsRef = useRef<number>(
+    !autoCall && lastExecutedAction === 'EMERGENCY' ? lastExecutedTimestamp : 0
+  );
 
   /**
-   * Kich hoat giao dien cuoc goi khan cap SOS (hien thi hop thoai dem gio + phat canh bao giong noi).
-   * Luu y: Hien dang mo phong giao dien va thong bao giong noi, chua noi API vien thong hay SMS that.
+   * Kich hoat cuoc goi khan cap SOS:
+   * - Chuyen huong ngay sang ung dung goi dien thoai mac dinh cua thiet bi qua `tel:`.
+   * - Hien thi hop thoai trang thai + phat canh bao giong noi.
    */
-  const startEmergencyCall = (contact: EmergencyContact) => {
+  const startEmergencyCall = (contact: EmergencyContact, isAuto = false) => {
+    if (isAuto && sosTriggeredRef.current) return;
+    sosTriggeredRef.current = true;
     setSelectedContact(contact);
     setHasSosTriggered(true);
     setIsCallConfirmed(true);
     setIsModalOpen(true);
-    speakVietnamese(`Đang thực hiện cuộc gọi khẩn cấp tới ${contact.name}! Định vị GPS đang được chia sẻ.`);
+    speakVietnamese(`Đang chuyển hướng cuộc gọi khẩn cấp tới ${contact.name}! Định vị GPS đang được chia sẻ.`);
+    triggerDevicePhoneCall(contact.phone);
   };
 
   // 1. Trigger if autoCall prop is true on mount
   useEffect(() => {
-    if (autoCall && !hasSosTriggered) {
-      startEmergencyCall(EMERGENCY_CONTACTS[0]);
+    if (autoCall && !sosTriggeredRef.current) {
+      handledEmergencyTsRef.current = lastExecutedTimestamp;
+      startEmergencyCall(EMERGENCY_CONTACTS[0], true);
     }
   }, [autoCall]);
 
   // 2. Global eyeai:emergency event listener
   useEffect(() => {
     const handleEmergencyEvent = () => {
-      if (!hasSosTriggered) {
-        startEmergencyCall(EMERGENCY_CONTACTS[0]);
+      if (!sosTriggeredRef.current) {
+        startEmergencyCall(EMERGENCY_CONTACTS[0], true);
       }
     };
     window.addEventListener('eyeai:emergency', handleEmergencyEvent);
     return () => window.removeEventListener('eyeai:emergency', handleEmergencyEvent);
-  }, [hasSosTriggered]);
+  }, []);
 
   // 3. Eye Tracking 3-Blink Detection trigger (Primary Requirement)
   useEffect(() => {
-    if ((blinkCount === 3 || lastExecutedAction === 'EMERGENCY') && !hasSosTriggered) {
-      startEmergencyCall(EMERGENCY_CONTACTS[0]);
+    const hasNewEmergencyAction =
+      lastExecutedAction === 'EMERGENCY' &&
+      lastExecutedTimestamp > handledEmergencyTsRef.current;
+
+    if ((blinkCount === 3 || hasNewEmergencyAction) && !sosTriggeredRef.current) {
+      handledEmergencyTsRef.current = lastExecutedTimestamp;
+      startEmergencyCall(EMERGENCY_CONTACTS[0], true);
     }
-  }, [blinkCount, lastExecutedAction, hasSosTriggered]);
+  }, [blinkCount, lastExecutedAction, lastExecutedTimestamp]);
 
   // 4. Secondary Safety Fallback: Prolonged 8-second eye close
   useEffect(() => {
-    if (closedDuration >= 8.0 && !hasSosTriggered) {
-      startEmergencyCall(EMERGENCY_CONTACTS[0]);
+    if (closedDuration >= 8.0 && !sosTriggeredRef.current) {
+      startEmergencyCall(EMERGENCY_CONTACTS[0], true);
     }
-  }, [closedDuration, hasSosTriggered]);
+  }, [closedDuration]);
 
   // Call timer effect when call is confirmed
   useEffect(() => {
@@ -102,13 +135,15 @@ export function SosPage({ onBack, autoCall = false }: SosPageProps) {
   };
 
   const handleConfirmCall = () => {
-    startEmergencyCall(selectedContact);
+    startEmergencyCall(selectedContact, false);
   };
 
   const handleCancelCall = () => {
     setIsModalOpen(false);
     setIsCallConfirmed(false);
     setHasSosTriggered(false);
+    sosTriggeredRef.current = false;
+    handledEmergencyTsRef.current = lastExecutedTimestamp;
     if (callIntervalRef.current) clearInterval(callIntervalRef.current);
     speakVietnamese('Đã dừng cuộc gọi khẩn cấp');
   };
@@ -241,10 +276,18 @@ export function SosPage({ onBack, autoCall = false }: SosPageProps) {
 
               <div className="w-full p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-bold flex items-center justify-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                <span>Tọa độ GPS hiện tại đã được gửi tới người thân</span>
+                <span>Đang chuyển hướng sang ứng dụng gọi điện &amp; gửi tọa độ GPS</span>
               </div>
 
-              <div className="w-full mt-2">
+              <div className="w-full flex flex-col gap-2.5 mt-2">
+                <a
+                  href={toTelHref(selectedContact.phone)}
+                  className="w-full py-3.5 px-4 rounded-[18px] bg-[#FF6F61] hover:bg-[#f06052] text-white font-black text-base flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
+                >
+                  <PhoneCall className="w-5 h-5" />
+                  <span>GỌI NGAY ({selectedContact.phone})</span>
+                </a>
+
                 <AppButton
                   id="btn-sos-hangup"
                   variant="secondary"

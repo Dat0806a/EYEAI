@@ -1,10 +1,31 @@
 import { GoogleGenAI } from "@google/genai";
+import { verifyAuthHeader } from "../../server/patientAuth";
+import { checkInMemoryRateLimit } from "../../server/securityMiddleware";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
+const MAX_AI_BODY_BYTES = 100 * 1024;
+const AI_RATE_LIMIT_WINDOW_MS = 60_000;
+const AI_RATE_LIMIT_MAX_REQUESTS = 30;
+
+function getCorsHeaders(origin?: string | null): Record<string, string> {
+  const appUrl = (process.env.APP_URL || "").trim().replace(/\/$/, "");
+  let allowedOrigin = appUrl || "null";
+  if (origin) {
+    const clean = origin.trim().replace(/\/$/, "");
+    if (
+      (appUrl && clean === appUrl) ||
+      clean.startsWith("http://localhost:") ||
+      clean.startsWith("http://127.0.0.1:")
+    ) {
+      allowedOrigin = clean;
+    }
+  }
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    Vary: "Origin",
+  };
+}
 
 const MODELS_TO_TRY = [
   "gemini-3.5-flash",
@@ -22,22 +43,31 @@ const SYSTEM_INSTRUCTION =
   "Tránh viết các đoạn quá dài, danh sách dài dòng hoặc bảng biểu phức tạp trừ khi người dùng yêu cầu chi tiết.";
 
 /**
- * Lay khoa Gemini API tu bien moi truong Netlify (`GEMINI_API_KEY` hoac `VITE_GEMINI_API_KEY`).
+ * Lay khoa Gemini API tu bien moi truong runtime (`process.env.GEMINI_API_KEY`).
  * Dung cho hai duong dan ham dam may `/api/ai/chat` va `/api/gemini/chat` khi trien khai len Netlify.
  */
 function getApiKey(): string {
-  return (
-    process.env.GEMINI_API_KEY ||
-    process.env.VITE_GEMINI_API_KEY ||
-    ""
-  ).trim();
+  return (process.env.GEMINI_API_KEY || "").trim();
 }
 
 /**
  * Xu ly yeu cau hoi dap AI phia ham dam may: kiem tra hop le tin nhan, lay toi da 15 luot lich su gan nhat
  * va goi tuan tu cac mo hinh Gemini du phong cho den khi co cau tra loi hop le.
  */
-async function processChat(body: any) {
+async function processChat(body: any, authHeader?: string) {
+  const authRes = await verifyAuthHeader(authHeader, { requirePatient: false });
+  if (!authRes.ok) {
+    return {
+      status: authRes.status,
+      data: {
+        error: authRes.error || "Không có quyền truy cập.",
+        code: authRes.code,
+        requiredAal: authRes.requiredAal,
+        currentAal: authRes.currentAal,
+      },
+    };
+  }
+
   const apiKey = getApiKey();
   if (!apiKey) {
     return {
@@ -71,6 +101,9 @@ async function processChat(body: any) {
 
   if (!userMessage) {
     return { status: 400, data: { error: "Nội dung tin nhắn không được để trống." } };
+  }
+  if (userMessage.length > 2000) {
+    return { status: 400, data: { error: "Tin nhắn quá dài (vượt quá 2000 ký tự)." } };
   }
 
   const recentHistory = historyMessages.slice(-15);
@@ -132,25 +165,63 @@ async function processChat(body: any) {
 
 // Netlify Functions V2
 export default async function (req: Request) {
+  const corsHeaders = getCorsHeaders(req.headers.get("origin"));
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const clientIp =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-nf-client-connection-ip") ||
+    "unknown";
+  const rate = checkInMemoryRateLimit({
+    key: `netlify-ai:${clientIp}`,
+    windowMs: AI_RATE_LIMIT_WINDOW_MS,
+    maxRequests: AI_RATE_LIMIT_MAX_REQUESTS,
+  });
+  if (!rate.allowed) {
+    return new Response(
+      JSON.stringify({
+        error: "RATE_LIMIT_EXCEEDED",
+        message: "Bạn thao tác quá nhanh. Vui lòng thử lại sau ít giây.",
+      }),
+      {
+        status: 429,
+        headers: {
+          ...corsHeaders,
+          "Retry-After": String(rate.retryAfterSec ?? 1),
+          "Content-Type": "application/json",
+        },
+      }
+    );
   }
 
   try {
-    let body: any = {};
-    if (req.method === "POST") {
-      body = await req.json().catch(() => ({}));
+    const rawBody = await req.text();
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_AI_BODY_BYTES) {
+      return new Response(JSON.stringify({ error: "Dữ liệu yêu cầu vượt quá giới hạn 100KB." }), {
+        status: 413,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
+    const body = rawBody ? JSON.parse(rawBody) : {};
 
-    const result = await processChat(body);
+    const authHeader = req.headers.get("authorization") || undefined;
+    const result = await processChat(body, authHeader);
     return new Response(JSON.stringify(result.data), {
       status: result.status,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err?.message || "Lỗi xử lý AI chat." }), {
+  } catch {
+    return new Response(JSON.stringify({ error: "Lỗi xử lý AI chat." }), {
       status: 500,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 }
@@ -161,23 +232,66 @@ export const config = {
 
 // Netlify Functions V1
 export async function handler(event: any) {
+  const origin = event.headers?.origin || event.headers?.Origin || null;
+  const corsHeaders = getCorsHeaders(origin);
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: CORS_HEADERS, body: "" };
+    return { statusCode: 204, headers: corsHeaders, body: "" };
+  }
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "Method Not Allowed" }),
+    };
+  }
+
+  const clientIp =
+    event.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    event.headers?.["x-nf-client-connection-ip"] ||
+    "unknown";
+  const rate = checkInMemoryRateLimit({
+    key: `netlify-ai:${clientIp}`,
+    windowMs: AI_RATE_LIMIT_WINDOW_MS,
+    maxRequests: AI_RATE_LIMIT_MAX_REQUESTS,
+  });
+  if (!rate.allowed) {
+    return {
+      statusCode: 429,
+      headers: {
+        ...corsHeaders,
+        "Retry-After": String(rate.retryAfterSec ?? 1),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        error: "RATE_LIMIT_EXCEEDED",
+        message: "Bạn thao tác quá nhanh. Vui lòng thử lại sau ít giây.",
+      }),
+    };
   }
 
   try {
-    const body = event.body ? JSON.parse(event.body) : {};
-    const result = await processChat(body);
+    const rawBody = typeof event.body === "string" ? event.body : "";
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_AI_BODY_BYTES) {
+      return {
+        statusCode: 413,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Dữ liệu yêu cầu vượt quá giới hạn 100KB." }),
+      };
+    }
+    const body = rawBody ? JSON.parse(rawBody) : {};
+    const authHeader =
+      event.headers?.authorization || event.headers?.Authorization || undefined;
+    const result = await processChat(body, authHeader);
     return {
       statusCode: result.status,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
       body: JSON.stringify(result.data),
     };
-  } catch (err: any) {
+  } catch {
     return {
       statusCode: 500,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: err?.message || "Lỗi xử lý AI chat." }),
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "Lỗi xử lý AI chat." }),
     };
   }
 }

@@ -72,16 +72,33 @@ export const CameraHub = memo(function CameraHub({
   const [showDebug, setShowDebug] = useState(false);
   const [nowTime, setNowTime] = useState<number>(performance.now());
 
-  // High-frequency UI tick for smooth cooldown countdown and badge glow decay
+  // Run rAF countdown ticker only while camera cooldown or active burst highlight is running
   useEffect(() => {
-    let animId: number;
+    const timeSinceExec = performance.now() - trackingState.lastExecutedTimestamp;
+    const needsAnimation =
+      trackingState.cooldownRemainingMs > 0 ||
+      (trackingState.lastExecutedTimestamp > 0 && timeSinceExec < 500);
+
+    if (!needsAnimation) {
+      return;
+    }
+
+    let animId = 0;
+    let active = true;
     const tick = () => {
-      setNowTime(performance.now());
-      animId = requestAnimationFrame(tick);
+      if (!active) return;
+      const now = performance.now();
+      setNowTime(now);
+      if (now - trackingState.lastExecutedTimestamp < Math.max(500, trackingState.cooldownTotalMs || 2500)) {
+        animId = requestAnimationFrame(tick);
+      }
     };
     animId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animId);
-  }, []);
+    return () => {
+      active = false;
+      cancelAnimationFrame(animId);
+    };
+  }, [trackingState.cooldownRemainingMs, trackingState.lastExecutedTimestamp, trackingState.cooldownTotalMs]);
 
   const {
     faceDetected,

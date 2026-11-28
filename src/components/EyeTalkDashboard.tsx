@@ -6,18 +6,43 @@ import { speakVietnamese, recoverAudioSession } from '../utils/speech';
 import { GridItem, EyeCalibrationData, EyeAction, EyeTrackingState, ChatMessage } from '../types';
 import { Camera, RefreshCw, Volume2, User, Sparkles, Keyboard, KeyboardOff, Eye, Send, RotateCcw, AlertTriangle, Monitor, Play, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from '@google/genai';
+import { AccountType } from '../types/account';
+import { hasValidFaceProcessingConsent } from '../modules/privacy/consentService';
+import { supabase } from '../lib/supabase';
 
 interface EyeTalkDashboardProps {
   onBackToHome: () => void;
+  auth?: {
+    isAuthenticated: boolean;
+    loading: boolean;
+    userId: string | null;
+    accountType: AccountType | null;
+  };
 }
 
-export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps) {
+export default function EyeTalkDashboard({ onBackToHome, auth }: EyeTalkDashboardProps) {
+  const isLegacyCameraDisabledInProd = import.meta.env.PROD;
+  const resolvedAuth = auth ?? {
+    isAuthenticated: false,
+    loading: false,
+    userId: null,
+    accountType: null,
+  };
+  const isCameraAuthorized =
+    !isLegacyCameraDisabledInProd &&
+    resolvedAuth.isAuthenticated &&
+    !resolvedAuth.loading &&
+    Boolean(resolvedAuth.userId) &&
+    resolvedAuth.accountType === 'impaired' &&
+    hasValidFaceProcessingConsent(resolvedAuth.userId);
+
   // References
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const faceMeshRef = useRef<any>(null);
+  const sessionTokenRef = useRef<number>(0);
+  const tempRawMetricsRef = useRef<{ ear: number; h: number; v: number }>({ ear: 0, h: 0, v: 0 });
 
   // Loaded libraries state
   const [libsLoading, setLibsLoading] = useState(true);
@@ -106,10 +131,9 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
           return;
         }
 
-        // Add MediaPipe CSS if any (not needed standard)
-        // Load main face_mesh script
+        // Load self-hosted face_mesh script
         const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js';
+        script.src = '/mediapipe/face_mesh/face_mesh.js';
         script.async = true;
         
         const scriptPromise = new Promise((resolve, reject) => {
@@ -304,11 +328,18 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
     setIsAiLoading(true);
     let reply: string | null = null;
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers,
         body: JSON.stringify({ messages: currentMessages })
       });
       
@@ -318,50 +349,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
         reply = data.text || data.reply || data.message;
       }
     } catch (err) {
-      console.warn("Server /api/gemini/chat unreachable, falling back:", err);
-    }
-
-    // Phuong an du phong ket noi truc tiep Gemini API tu trinh duyet (giao dien phien ban cu v2.1)
-    // Doc khoa API tu bien moi truong `VITE_GEMINI_API_KEY` hoac `GEMINI_API_KEY` neu may chu `/api/ai-chat` khong phan hoi.
-    if (!reply) {
-      try {
-        const apiKey = (
-          import.meta.env.VITE_GEMINI_API_KEY ||
-          import.meta.env.GEMINI_API_KEY ||
-          ""
-        ).trim();
-        if (apiKey) {
-          const ai = new GoogleGenAI({
-            apiKey,
-            httpOptions: { headers: { "User-Agent": "aistudio-build" } },
-          });
-          const recent = currentMessages.slice(-10);
-          const contents = recent.map(m => ({
-            role: m.sender === "user" ? "user" : "model",
-            parts: [{ text: m.text }],
-          }));
-          const models = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash"];
-          for (const m of models) {
-            try {
-              const res = await ai.models.generateContent({
-                model: m,
-                contents,
-                config: {
-                  systemInstruction: "Bạn là Trợ lý AI giao tiếp thân thiện của hệ thống LUCKY DREAM – EYEAI. Trả lời bằng Tiếng Việt ngắn gọn 2-4 câu.",
-                },
-              });
-              if (res && res.text) {
-                reply = res.text;
-                break;
-              }
-            } catch {
-              // Try next model
-            }
-          }
-        }
-      } catch (clientErr) {
-        console.warn("Client Gemini fallback error:", clientErr);
-      }
+      console.warn("Server /api/gemini/chat unreachable:", err);
     }
 
     if (reply) {
@@ -385,7 +373,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
     setIsAiLoading(false);
   };
 
-  // Turn ON / OFF camera and Eye-tracking
+  // Turn ON / OFF camera and Eye-tracking (Legacy pipeline disabled in production & guarded by Auth + Consent)
   const toggleCamera = async () => {
     if (trackingState.cameraActive) {
       // Turn OFF
@@ -398,12 +386,22 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
       setSimulatorMode(true);
       recoverAudioSession();
     } else {
+      if (isLegacyCameraDisabledInProd || !isCameraAuthorized) {
+        setSimulatorMode(true);
+        return;
+      }
+      const sessionToken = ++sessionTokenRef.current;
       // Turn ON
       setSimulatorMode(false);
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 640, height: 480, facingMode: 'user' }
         });
+
+        if (sessionToken !== sessionTokenRef.current) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
         
         if (videoRef.current) {
           videoRef.current.muted = true;
@@ -414,15 +412,17 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
           videoRef.current.setAttribute('webkit-playsinline', '');
           videoRef.current.srcObject = stream;
           videoRef.current.onloadedmetadata = () => {
+            if (sessionToken !== sessionTokenRef.current) return;
             videoRef.current?.play().catch(() => {});
-            startTrackingLoop();
+            startTrackingLoop(sessionToken);
           };
           setTrackingState(prev => ({ ...prev, cameraActive: true }));
           recoverAudioSession();
+        } else {
+          stream.getTracks().forEach(track => track.stop());
         }
       } catch (err) {
         console.error('Không thể mở camera:', err);
-        alert('Không khởi tạo được camera. Vui lòng xác nhận quyền truy cập máy ảnh và thử lại hoặc tiếp tục dùng chế độ Giả lập.');
         setSimulatorMode(true);
         recoverAudioSession();
       }
@@ -431,6 +431,8 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
 
   // Stop camera tracking loop
   const stopTrackingLoop = () => {
+    sessionTokenRef.current += 1;
+    tempRawMetricsRef.current = { ear: 0, h: 0, v: 0 };
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -443,17 +445,30 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
+    if (faceMeshRef.current && typeof faceMeshRef.current.close === 'function') {
+      try {
+        Promise.resolve(faceMeshRef.current.close()).catch(() => {});
+      } catch {}
+    }
+    faceMeshRef.current = null;
     recoverAudioSession();
   };
 
   useEffect(() => {
+    // Clean up any legacy raw metric keys from sessionStorage
+    try {
+      sessionStorage.removeItem('tmp_raw_ear');
+      sessionStorage.removeItem('tmp_raw_h');
+      sessionStorage.removeItem('tmp_raw_v');
+    } catch {}
     return () => {
       stopTrackingLoop();
     };
   }, []);
 
   // Set up MediaPipe FaceMesh
-  const startTrackingLoop = () => {
+  const startTrackingLoop = (sessionToken: number) => {
+    if (isLegacyCameraDisabledInProd || !isCameraAuthorized) return;
     if (!(window as any).FaceMesh) {
       console.error('FaceMesh library is not available in global scope.');
       return;
@@ -461,7 +476,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
 
     if (!faceMeshRef.current) {
       const faceMesh = new (window as any).FaceMesh({
-        locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        locateFile: (file: string) => `/mediapipe/face_mesh/${file}`
       });
 
       faceMesh.setOptions({
@@ -472,6 +487,7 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
       });
 
       faceMesh.onResults((results: any) => {
+        if (sessionToken !== sessionTokenRef.current) return;
         processFaceMeshResults(results);
       });
 
@@ -481,15 +497,16 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
     lastFrameTime.current = Date.now();
     
     const render = async () => {
+      if (sessionToken !== sessionTokenRef.current) return;
       const video = videoRef.current;
-      if (video && video.readyState >= 2) {
+      if (video && video.readyState >= 2 && faceMeshRef.current) {
         try {
           await faceMeshRef.current.send({ image: video });
         } catch (e) {
           console.error('Failed to send frame to FaceMesh:', e);
         }
       }
-      if (trackingState.cameraActive || videoRef.current?.srcObject) {
+      if (sessionToken === sessionTokenRef.current && (trackingState.cameraActive || videoRef.current?.srcObject)) {
         animationFrameRef.current = requestAnimationFrame(render);
       }
     };
@@ -552,11 +569,10 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
         return;
       }
 
-      // Read current tracking values directly from temporary frames
-      // which are populated in processFaceMeshResults index changes
-      const currentRawEAR = parseFloat(sessionStorage.getItem('tmp_raw_ear') || '0');
-      const currentRawH = parseFloat(sessionStorage.getItem('tmp_raw_h') || '0');
-      const currentRawV = parseFloat(sessionStorage.getItem('tmp_raw_v') || '0');
+      // Read current tracking values directly from in-memory ref (never sessionStorage)
+      const currentRawEAR = tempRawMetricsRef.current.ear;
+      const currentRawH = tempRawMetricsRef.current.h;
+      const currentRawV = tempRawMetricsRef.current.v;
 
       if (currentRawEAR > 0) {
         collectedEAR.push(currentRawEAR);
@@ -602,10 +618,12 @@ export default function EyeTalkDashboard({ onBackToHome }: EyeTalkDashboardProps
       return;
     }
 
-    // Save temporary data in session storage to facilitate Calibration collector
-    sessionStorage.setItem('tmp_raw_ear', metrics.avgEAR.toString());
-    sessionStorage.setItem('tmp_raw_h', metrics.avgIrisH.toString());
-    sessionStorage.setItem('tmp_raw_v', metrics.avgIrisV.toString());
+    // Keep temporary calibration metrics strictly in RAM (never sessionStorage)
+    tempRawMetricsRef.current = {
+      ear: metrics.avgEAR,
+      h: metrics.avgIrisH,
+      v: metrics.avgIrisV,
+    };
 
     // Compute delta variations
     const deltaH = metrics.avgIrisH - calibration.neutralIrisH;

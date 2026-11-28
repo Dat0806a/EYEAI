@@ -4,9 +4,18 @@ import { AuthStage } from '../components/auth/AuthStage';
 export interface AuthPageProps {
   initialMode?: 'login' | 'register';
   onLoginSuccess: () => void;
+  onAuthStart?: () => void;
+  pendingEmailOtp?: boolean;
+  onPendingEmailOtpChange?: (pending: boolean) => void;
 }
 
-export function AuthPage({ initialMode = 'login', onLoginSuccess }: AuthPageProps) {
+export function AuthPage({
+  initialMode = 'login',
+  onLoginSuccess,
+  onAuthStart,
+  pendingEmailOtp,
+  onPendingEmailOtpChange,
+}: AuthPageProps) {
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
 
   useEffect(() => {
@@ -18,6 +27,9 @@ export function AuthPage({ initialMode = 'login', onLoginSuccess }: AuthPageProp
       mode={mode}
       onModeChange={setMode}
       onLoginSuccess={onLoginSuccess}
+      onAuthStart={onAuthStart}
+      pendingEmailOtp={pendingEmailOtp}
+      onPendingEmailOtpChange={onPendingEmailOtpChange}
     />
   );
 }
